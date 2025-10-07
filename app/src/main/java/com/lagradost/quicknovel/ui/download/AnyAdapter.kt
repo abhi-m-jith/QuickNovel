@@ -202,13 +202,13 @@ class AnyAdapter(
 
                                 chapterCountOverlay.isVisible = true
                                 chapterCountOverlay.text = if (chapterCount != null && chapterCount > 0) {
-                                    "$chapterCount ch"
+                                    "$chapterCount"
                                 }
                                 else {
                                     if(chapterCount==0){
                                         chapterCountOverlay.isVisible = false
                                     }
-                                    "$chapterCountStr ch" // fallback to string like "V5 46"
+                                    "$chapterCountStr" // fallback to string like "V5 46"
                                 }
                             }
                             else
