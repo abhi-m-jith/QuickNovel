@@ -1,0 +1,40 @@
+name: "🚀 Site Suggestion"
+description: "Suggest a new website to be added"
+title: "[Site Suggestion] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new site! Please fill out the form below.
+        
+  - type: input
+    id: site-name
+    attributes:
+      label: "Site Name"
+      description: "The name of the website"
+      placeholder: "Example Site"
+    validations:
+      required: true
+      
+  - type: input
+    id: site-url
+    attributes:
+      label: "Site URL"
+      description: "The full URL of the website"
+      placeholder: "https://example.com"
+    validations:
+      required: true
+      
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description"
+      description: "Brief description of what this site offers"
+      placeholder: "This site provides..."
+      
+  - type: textarea
+    id: additional-notes
+    attributes:
+      label: "Additional Notes"
+      description: "Any other information that might be helpful"
