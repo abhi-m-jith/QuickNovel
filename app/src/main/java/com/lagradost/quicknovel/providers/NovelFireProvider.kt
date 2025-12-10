@@ -114,7 +114,6 @@ class NovelFireProvider :  MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        isOpeningBook=true
         isChapterCountFilterNeeded=true
         val collectedResults = mutableListOf<SearchResponse>()
         var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page
@@ -190,6 +189,7 @@ class NovelFireProvider :  MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
+        isOpeningBook=true
         val document = app.get(url).document
 
         // Extract title
@@ -276,57 +276,47 @@ class NovelFireProvider :  MainAPI() {
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+    override suspend fun search(query: String,page: Int): List<SearchResponse> {
 
 
-        var currentPage = 1
+        var currentPage = page
         var fetchedAll = false
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
 
-        while (!fetchedAll) {
-            val url = "$mainUrl/search/?keyword=$encodedQuery&page=$currentPage"
-            val document = app.get(url).document
+        val url = "$mainUrl/search/?keyword=$encodedQuery&page=$currentPage"
+        val document = app.get(url).document
 
-            val searchList = document.select("ul.novel-list.horizontal.col2.chapters").firstOrNull()
-            val novels = searchList?.select("li.novel-item") ?: emptyList()
+        val searchList = document.select("ul.novel-list.horizontal.col2.chapters").firstOrNull()
+        val novels = searchList?.select("li.novel-item") ?: emptyList()
 
-            if (novels.isEmpty()) {
-                fetchedAll = true
-                break
-            }
-
-            for (element in novels) {
-                val anchor = element.selectFirst("a") ?: continue
-                val title = anchor.attr("title").trim()
-                val novelUrl = anchor.absUrl("href")
-                val coverUrl = anchor.selectFirst("img")?.absUrl("src") ?: ""
-
-                // Extract chapter count
-                val chapterStat = anchor.select("div.novel-stats").firstOrNull { stat ->
-                    stat.selectFirst("i.icon-book-open") != null
-                }
-                val chapterText = chapterStat?.text()?.trim() ?: ""
-                val chapterCount = Regex("(\\d+)").find(chapterText)?.value
-
-                results.add(
-                    newSearchResponse(title,fixUrl(novelUrl)){
-                        posterUrl=coverUrl
-                        totalChapterCount=chapterCount
-                    }
-                )
-            }
-
-            // Check if "Next ›" pagination exists
-            val hasNext = document.select("ul.pagination li.page-item > a.page-link")
-                .any { it.text().contains("›") }
-
-            if (hasNext) {
-                currentPage++
-            } else {
-                fetchedAll = true
-            }
+        if (novels.isEmpty()) {
+            fetchedAll = true
+            isLastPage=true
         }
+
+        for (element in novels) {
+            val anchor = element.selectFirst("a") ?: continue
+            val title = anchor.attr("title").trim()
+            val novelUrl = anchor.absUrl("href")
+            val coverUrl = anchor.selectFirst("img")?.absUrl("src") ?: ""
+
+            // Extract chapter count
+            val chapterStat = anchor.select("div.novel-stats").firstOrNull { stat ->
+                stat.selectFirst("i.icon-book-open") != null
+            }
+            val chapterText = chapterStat?.text()?.trim() ?: ""
+            val chapterCount = Regex("(\\d+)").find(chapterText)?.value
+
+            results.add(
+                newSearchResponse(title,fixUrl(novelUrl)){
+                    posterUrl=coverUrl
+                    totalChapterCount=chapterCount
+                }
+            )
+        }
+
+
 
         return results
 

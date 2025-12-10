@@ -27,6 +27,8 @@ abstract class MainAPI {
     open var isChapterCountFilterNeeded=false
     open var ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
     open var isOpeningBook=false
+    open var isSearching=false
+    open var isLastPage=false
 
     open val usesCloudFlareKiller = false
 
@@ -79,7 +81,7 @@ abstract class MainAPI {
 
     open fun ResetFiltersandPage()
     {
-
+        android.util.Log.d("RESET FILTER","Filter has been Reset")
     }
 
     /*open suspend fun loadEpub(link: DownloadLinkType): ByteArray {

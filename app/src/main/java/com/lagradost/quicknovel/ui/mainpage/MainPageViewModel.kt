@@ -11,6 +11,7 @@ import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.map
 import com.lagradost.quicknovel.util.Apis
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class MainPageViewModel : ViewModel() {
@@ -23,6 +24,7 @@ class MainPageViewModel : ViewModel() {
     }*/
 
     private val infCards: ArrayList<SearchResponse> = arrayListOf()
+    private val infSearchCards: ArrayList<SearchResponse> = arrayListOf()
     private var oldResponse: Resource<SearchResponseList>? = null
     private var searchResponseListQueries : Int = 0
 
@@ -78,6 +80,20 @@ class MainPageViewModel : ViewModel() {
         }
     }
 
+    public var currentSearchQuery: String? = null
+    public var searchPage = 0
+    public var isLoadingSearch = false
+    public var hasQueryInput=false
+
+    fun ResetVales()
+    {
+        infSearchCards.clear()
+        hasQueryInput=false
+        currentSearchQuery=""
+        searchPage=0
+        api.api.isLastPage=false
+    }
+
     fun search(query: String) {
         if (isInSearch.value == false) {
             oldResponse = currentCards.value
@@ -91,6 +107,70 @@ class MainPageViewModel : ViewModel() {
             val res = repo.search(query)
             currentCards.postValue(res.map { x -> SearchResponseList(items = x, pages = 1, id = ++searchResponseListQueries) })
         }
+    }
+    fun search(query: String, page: Int = 1) {
+
+        if(api.api.isLastPage)
+        {
+            return
+        }
+        searchPage=page
+        api.api.isSearching=true
+        if (page == 1) {
+            infSearchCards.clear()
+            currentSearchQuery = query
+            hasQueryInput=true
+            currentCards.postValue(Resource.Loading())
+        }
+        if (isInSearch.value == false) {
+            oldResponse = currentCards.value
+        }
+
+        currentPage.postValue(searchPage)
+        isInSearch.postValue(true)
+        if (page != 1) {
+            loadingMoreItems.postValue(true)
+        }
+
+        android.util.Log.d("SEARCH AREA","${query} ${searchPage} ${page} ${infSearchCards.count()}")
+
+        viewModelScope.launch {
+
+            when (val res = repo.search(query, searchPage)) {
+                is Resource.Success -> {
+                    val response = res.value
+                    infSearchCards.addAll(response)
+
+                    currentCards.postValue(
+                        Resource.Success(
+                            SearchResponseList(
+                                infSearchCards,
+                                searchPage,
+                                ++searchResponseListQueries
+                            )
+                        )
+                    )
+                }
+
+                is Resource.Failure -> {
+                    val result: Resource<SearchResponseList> = Resource.Failure(
+                        res.isNetworkError,
+                        res.errorCode,
+                        res.errorResponse,
+                        res.errorString
+                    )
+                    currentCards.postValue(result)
+                }
+
+                is Resource.Loading -> {
+                    //NOTHING
+                }
+            }
+
+            loadingMoreItems.postValue(false)
+            api.api.isSearching=false
+        }
+
     }
 
     fun switchToMain() {

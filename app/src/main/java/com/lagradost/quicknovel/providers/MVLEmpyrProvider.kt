@@ -340,7 +340,6 @@ class MVLEmpyrProvider : MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        isOpeningBook=true
         val itemsPerPage = 30
 
         // Fetch only once when fullNovelList is empty
@@ -427,6 +426,7 @@ class MVLEmpyrProvider : MainAPI() {
 
 
     override suspend fun load(url: String): LoadResponse {
+        isOpeningBook=true
         val slugRegex = Regex("/novel/([^/]+)")
         val slug = slugRegex.find(url)?.groupValues?.get(1) ?: throw ErrorLoadingException("Slug not found")
 

@@ -111,7 +111,6 @@ class WuxiaBoxProvider :  MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        isOpeningBook=true
         var pp=page
         if(pp>0){
             pp--
@@ -190,6 +189,7 @@ class WuxiaBoxProvider :  MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
+        isOpeningBook=true
         val document = app.get(url).document
 
 
@@ -277,10 +277,10 @@ class WuxiaBoxProvider :  MainAPI() {
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+    override suspend fun search(query: String,page: Int): List<SearchResponse> {
 
 
-        var currentPage = 0
+        var currentPage = page-1
         val results = mutableListOf<SearchResponse>()
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
 
@@ -300,37 +300,40 @@ class WuxiaBoxProvider :  MainAPI() {
         // Regex to pull out the digits after searchid=
         val searchId = Regex("searchid=(\\d+)").find(redirectValue)?.groupValues?.get(1)
 
-        while (true) {
-            val url = "$mainUrl/e/search/result/index.php?page=$currentPage&searchid=$searchId"
-            val document = app.get(url, timeout = 60).document
+        val url = "$mainUrl/e/search/result/index.php?page=$currentPage&searchid=$searchId"
+        val document = app.get(url, timeout = 60).document
 
-            val pageResults = document.select("li.novel-item").mapNotNull { element ->
-                val node = element.selectFirst("a[title]") ?: return@mapNotNull null
-                val href = fixUrl(node.attr("href"))
-                val title = node.attr("title")
-                    .ifBlank { element.selectFirst("h4.novel-title")?.text() }
-                    ?: return@mapNotNull null
+        val pageResults = document.select("li.novel-item").mapNotNull { element ->
+            val node = element.selectFirst("a[title]") ?: return@mapNotNull null
+            val href = fixUrl(node.attr("href"))
+            val title = node.attr("title")
+                .ifBlank { element.selectFirst("h4.novel-title")?.text() }
+                ?: return@mapNotNull null
 
-                val cover = element.selectFirst("img")?.let {
-                    it.attr("data-src").ifBlank { it.attr("src") }
-                }
-
-                val chapterText = element.select("div.novel-stats span")
-                    .firstOrNull { it.text().contains("Chapters", true) }
-                    ?.text().orEmpty()
-                val chapterCount = Regex("""\d+""").find(chapterText)?.value
-
-                newSearchResponse(title, href) {
-                    posterUrl = fixUrlNull(cover)
-                    totalChapterCount = chapterCount
-                }
+            val cover = element.selectFirst("img")?.let {
+                it.attr("data-src").ifBlank { it.attr("src") }
             }
 
-            if (pageResults.isEmpty()) break
+            val chapterText = element.select("div.novel-stats span")
+                .firstOrNull { it.text().contains("Chapters", true) }
+                ?.text().orEmpty()
+            val chapterCount = Regex("""\d+""").find(chapterText)?.value
 
-            results.addAll(pageResults)
-            currentPage++
+            newSearchResponse(title, href) {
+                posterUrl = fixUrlNull(cover)
+                totalChapterCount = chapterCount
+            }
         }
+        if(pageResults.isNotEmpty())
+        {
+            results.addAll(pageResults)
+        }
+        else
+        {
+            isLastPage=true
+        }
+
+
 
         return results
 

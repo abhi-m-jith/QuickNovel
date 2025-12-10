@@ -145,6 +145,7 @@ class MainPageFragment : Fragment() {
 
                 override fun onMenuItemActionCollapse(p0: MenuItem): Boolean {
                     viewModel.switchToMain()
+                    viewModel.ResetVales()
                     return true
                 }
             })
@@ -153,11 +154,12 @@ class MainPageFragment : Fragment() {
 
             searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String): Boolean {
-                    viewModel.search(query)//MainActivity.activeAPI.search(query)
+                    viewModel.search(query,1)//MainActivity.activeAPI.search(query)
                     return true
                 }
 
                 override fun onQueryTextChange(newText: String): Boolean {
+                    viewModel.ResetVales()
                     return true
                 }
             })
@@ -187,6 +189,9 @@ class MainPageFragment : Fragment() {
                                     viewModel.currentTag.value,
                                 )
                             }
+                        }
+                        else if (viewModel.hasQueryInput && !viewModel.api.api.isSearching && !viewModel.isLoadingSearch && visibleItemCount + pastVisiblesItems >= totalItemCount) {
+                            viewModel.search(viewModel.currentSearchQuery.toString(),viewModel.searchPage+1)
                         }
                     } else if (dy < -5) {
                         binding.mainpageFab.extend()

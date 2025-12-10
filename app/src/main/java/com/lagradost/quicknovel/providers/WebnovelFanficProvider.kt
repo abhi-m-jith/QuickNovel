@@ -70,6 +70,7 @@ class WebnovelFanficProvider : MainAPI() {
     val minBooksNeeded=11
     val maxPagesToFetch=20
 
+
     val seenUrls = HashSet<String>()
 
     override fun FABFilterApplied() {
@@ -98,7 +99,7 @@ class WebnovelFanficProvider : MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        isOpeningBook=true
+
         ensureCookiesLoaded()
 
         isChapterCountFilterNeeded=true
@@ -144,7 +145,7 @@ class WebnovelFanficProvider : MainAPI() {
             }
             else
             {
-
+                Log.w("WEBNOVEL","Load Success !! Current Page: ${currentPage} ${collectedResults.size}")
 
                 val json = JSONObject(body)
                 val items = json.getJSONObject("data").getJSONArray("items")
@@ -214,25 +215,30 @@ class WebnovelFanficProvider : MainAPI() {
         return HeadMainPageResponse(apiUrl, collectedResults)
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+    override suspend fun search(query: String,page: Int): List<SearchResponse> {
+
         ensureCookiesLoaded()
 
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val results = mutableListOf<SearchResponse>()
         val allResults = mutableListOf<SearchResponse>()
         var pageIndex = 1
-        var isLastPage = false
 
-        while (!isLastPage) {
-            val nextPage = fetchSearchPage(encodedQuery, pageIndex)
-            allResults.addAll(nextPage.first)
-            isLastPage = nextPage.second
-            pageIndex++
-        }
-        return allResults
+//        while (!isLastPage) {
+//            val nextPage = fetchSearchPage(encodedQuery, pageIndex)
+//            allResults.addAll(nextPage.first)
+//            isLastPage = nextPage.second
+//            pageIndex++
+//        }
+
+        val nextPage = fetchSearchPage(encodedQuery, page)
+        results.addAll(nextPage.first)
+        isLastPage = nextPage.second
+        Log.e("WEBNOVEL","Current Page: ${lastLoadedPage}")
+        return results
     }
 
-    private fun fetchSearchPage(encodedQuery: String, pageIndex: Int): Pair<List<SearchResponse>, Boolean> {
+    private fun fetchSearchPage(encodedQuery: String, pageIndex: Int,Retry:Boolean=false): Pair<List<SearchResponse>, Boolean> {
         val url = "$mainUrl/go/pcm/search/result?_csrfToken=$cachedCsrfToken&pageIndex=$pageIndex&type=fanfic&keywords=$encodedQuery"
 
         val request = Request.Builder()
@@ -246,34 +252,56 @@ class WebnovelFanficProvider : MainAPI() {
         val response = OkHttpClient().newCall(request).execute()
         val body = response.body?.string() ?: return Pair(emptyList(), true)
 
-        val json = JSONObject(body)
-        val data = json.optJSONObject("data") ?: return Pair(emptyList(), true)
-        val fanficData = data.optJSONObject("fanficBookInfo") ?: return Pair(emptyList(), true)
-        val books = fanficData.optJSONArray("fanficBookItems") ?: return Pair(emptyList(), true)
+        if(!body.startsWith("{") || body.startsWith("<!DOCTYPE"))
+        {
+            if(Retry)
+            {
+                Log.e("WEBNOVEL", "Non-JSON response detected, skipping page.")
+                return Pair(emptyList(), false)
+            }
+            else
+            {
+                Log.e("WEBNOVEL", "Non-JSON response detected, Retrying Once after 3 second.")
+                Thread.sleep(3000)
+                return  fetchSearchPage(encodedQuery,pageIndex,true)
+            }
+        }
+        else{
+            Log.w("WEBNOVEL","Load Success !! Query: ${encodedQuery} Current Page: ${pageIndex} ")
+            val json = JSONObject(body)
+            val data = json.optJSONObject("data") ?: return Pair(emptyList(), true)
+            val fanficData = data.optJSONObject("fanficBookInfo") ?: return Pair(emptyList(), true)
+            val books = fanficData.optJSONArray("fanficBookItems") ?: return Pair(emptyList(), true)
 
-        val results = mutableListOf<SearchResponse>()
-        for (i in 0 until books.length()) {
-            val book = books.getJSONObject(i)
-            val id = book.optString("bookId") ?: continue
-            val title = book.optString("bookName", "Untitled")
-            val cover = "https://book-pic.webnovel.com/bookcover/$id?imageMogr2/thumbnail/180x|imageMogr2/format/webp|imageMogr2/quality/70!"
-            val link = "$mainUrl/book/$id"
-            val chapterCount=book.optString("chapterNum","0")
+            val results = mutableListOf<SearchResponse>()
+            for (i in 0 until books.length()) {
+                val book = books.getJSONObject(i)
+                val id = book.optString("bookId") ?: continue
+                val title = book.optString("bookName", "Untitled")
+                val cover = "https://book-pic.webnovel.com/bookcover/$id?imageMogr2/thumbnail/180x|imageMogr2/format/webp|imageMogr2/quality/70!"
+                val link = "$mainUrl/book/$id"
+                val chapterCount=book.optString("chapterNum","0")
 
-            results.add( newSearchResponse(title, fixUrl(link)) {
-                this.posterUrl = cover;
-                this.totalChapterCount=chapterCount
-            })
+                results.add( newSearchResponse(title, fixUrl(link)) {
+                    this.posterUrl = cover;
+                    this.totalChapterCount=chapterCount
+                })
 
+            }
+
+            val isLastPage = fanficData.optInt("isLast", 1) == 1
+            Log.d("TEST PAGE","isLast : ${fanficData.optInt("isLast")}  ${isLastPage}")
+
+            return Pair(results, isLastPage)
         }
 
-        val isLastPage = fanficData.optInt("isLast", 1) == 1
-        return Pair(results, isLastPage)
+
     }
 
 
 
     override suspend fun load(url: String): StreamResponse {
+        isOpeningBook=true
         ensureCookiesLoaded()
 
         val bookId = url.substringAfterLast("/")

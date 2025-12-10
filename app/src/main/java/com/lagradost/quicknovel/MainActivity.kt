@@ -453,7 +453,7 @@ class MainActivity : AppCompatActivity() {
 
         super.onCreate(savedInstanceState)
 
-        context = applicationContext // ✅ Safe!
+        context = applicationContext // Safe!
 
         context.setLibraryBooks()
 
