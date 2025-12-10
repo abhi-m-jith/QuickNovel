@@ -111,6 +111,7 @@ class WuxiaBoxProvider :  MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
+        isOpeningBook=true
         var pp=page
         if(pp>0){
             pp--

@@ -340,6 +340,7 @@ class MVLEmpyrProvider : MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
+        isOpeningBook=true
         val itemsPerPage = 30
 
         // Fetch only once when fullNovelList is empty

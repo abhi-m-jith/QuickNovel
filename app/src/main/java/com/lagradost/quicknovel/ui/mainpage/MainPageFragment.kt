@@ -15,6 +15,7 @@ import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -117,6 +118,11 @@ class MainPageFragment : Fragment() {
                 //navController.navigate(R.id.navigation_homepage, Bundle(), MainActivity.navOptions)
                 // activity?.popCurrentPage()
                 activity?.onBackPressed()
+                val navController = findNavController()
+                if (navController.previousBackStackEntry?.destination?.id == R.id.navigation_homepage)
+                {
+                    viewModel.api.api.ResetFiltersandPage()
+                }
             }
             setOnMenuItemClickListener {
                 when (it.itemId) {
@@ -325,6 +331,13 @@ class MainPageFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        viewModel.api.api.ResetFiltersandPage()
+        if(!viewModel.api.api.isOpeningBook)
+        {
+            viewModel.api.api.ResetFiltersandPage()
+        }
+        else
+        {
+            viewModel.api.api.isOpeningBook=false
+        }
     }
 }

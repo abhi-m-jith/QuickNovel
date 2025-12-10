@@ -114,7 +114,7 @@ class NovelFireProvider :  MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-
+        isOpeningBook=true
         isChapterCountFilterNeeded=true
         val collectedResults = mutableListOf<SearchResponse>()
         var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page

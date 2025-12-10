@@ -98,7 +98,7 @@ class WebnovelFanficProvider : MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-
+        isOpeningBook=true
         ensureCookiesLoaded()
 
         isChapterCountFilterNeeded=true
@@ -113,7 +113,7 @@ class WebnovelFanficProvider : MainAPI() {
 
         //var apiUrl = "$mainUrl/go/pcm/category/categoryAjax?_csrfToken=$cachedCsrfToken&language=en&categoryId=$categoryId&categoryType=4&orderBy=$orderBy&pageIndex=$page&bookStatus=$mainCategory"
 
-        fun fetchPage(p: Int): Pair<List<SearchResponse>, Boolean> {
+        fun fetchPage(p: Int,Retry:Boolean=false): Pair<List<SearchResponse>, Boolean> {
             val apiUrl =
                 "$mainUrl/go/pcm/category/categoryAjax?_csrfToken=$cachedCsrfToken&language=en&categoryId=$categoryId&categoryType=4&orderBy=$orderBy&pageIndex=$p&bookStatus=$mainCategory"
 
@@ -130,8 +130,17 @@ class WebnovelFanficProvider : MainAPI() {
 
             if(!body.startsWith("{") || body.startsWith("<!DOCTYPE"))
             {
-                Log.e("WEBNOVEL", "Non-JSON response detected, skipping page.")
-                return Pair(emptyList(), false)
+                if(Retry)
+                {
+                    Log.e("WEBNOVEL", "Non-JSON response detected, skipping page.")
+                    return Pair(emptyList(), false)
+                }
+                else
+                {
+                    Log.e("WEBNOVEL", "Non-JSON response detected, Retrying Once after 3 second.")
+                    Thread.sleep(3000)
+                    return  fetchPage(p,true)
+                }
             }
             else
             {

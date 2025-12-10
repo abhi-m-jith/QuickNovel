@@ -26,6 +26,7 @@ abstract class MainAPI {
 
     open var isChapterCountFilterNeeded=false
     open var ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
+    open var isOpeningBook=false
 
     open val usesCloudFlareKiller = false
 
@@ -58,6 +59,9 @@ abstract class MainAPI {
     }
 
     open suspend fun search(query: String): List<SearchResponse>? {
+        throw NotImplementedError()
+    }
+    open suspend fun search(query: String,page: Int = 0): List<SearchResponse>? {
         throw NotImplementedError()
     }
 

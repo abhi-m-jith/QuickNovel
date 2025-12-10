@@ -424,6 +424,13 @@ class MainActivity : AppCompatActivity() {
             R.id.navigation_settings,
         ).contains(destination.id)
 
+        if (destination.id == R.id.navigation_mainpage)
+        {
+            binding?.navView?.menu
+                ?.findItem(R.id.navigation_homepage)
+                ?.isChecked = true
+        }
+
         binding?.apply {
             navView.isVisible = isNavVisible
         }
