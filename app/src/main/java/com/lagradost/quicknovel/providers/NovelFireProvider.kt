@@ -14,9 +14,9 @@ import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newChapterData
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
-import com.lagradost.quicknovel.setStatus
+import org.json.JSONObject
 import org.jsoup.Jsoup
-import kotlin.math.roundToInt
+import org.jsoup.parser.Parser
 
 class NovelFireProvider :  MainAPI() {
     override val name = "NovelFire"
@@ -187,6 +187,22 @@ class NovelFireProvider :  MainAPI() {
 
 
     }
+    fun extractChapterApi(html: String): String? {
+        val document = Jsoup.parse(html)
+        val scripts = document.select("script")
+
+        for (script in scripts) {
+            val data = script.data()
+            if (data.contains("listChapterDataAjax")) {
+                val regex = Regex("""/listChapterDataAjax\?post_id=\d+""")
+                val match = regex.find(data)
+                if (match != null) {
+                    return match.value
+                }
+            }
+        }
+        return null
+    }
 
     override suspend fun load(url: String): LoadResponse {
         isOpeningBook=true
@@ -210,39 +226,32 @@ class NovelFireProvider :  MainAPI() {
         var currentPage = 1
         var fetchedAll = false
 
-        while (!fetchedAll) {
-            val chaptersPageUrl = "$mainUrl/book/$bookId/chapters?page=$currentPage"
+        val chaptersPageUrl = "$mainUrl/book/$bookId/chapters?page=$currentPage"
 
-            // Get the raw HTML response
-            val response = app.get(chaptersPageUrl)
-            val html = response.text
-            val document = Jsoup.parse(html)
+        // Get the raw HTML response
+        val response = app.get(chaptersPageUrl)
+        val html = response.text
 
-            // Select all chapter <li> elements
-            val chapterElements = document.select("ul.chapter-list > li")
+        val chapsapi="$mainUrl${extractChapterApi(html)}"
 
-            if (chapterElements.isEmpty()) {
-                fetchedAll = true
-            } else {
-                val pageChapters = chapterElements.mapNotNull { li ->
-                    val aTag = li.selectFirst("a") ?: return@mapNotNull null
-                    val title = aTag.attr("title")?.trim() ?: return@mapNotNull null
-                    val url = aTag.attr("href")?.trim() ?: return@mapNotNull null
+        // Get the raw HTML response
+        val resp = app.get(chapsapi)
+        val html2 = resp.text
+        val root = JSONObject(html2)
+        val jsonArray = root.getJSONArray("data")
 
-                    newChapterData(title, fixUrl(url))
-                }
+        for (i in 0 until jsonArray.length()) {
+            val item = jsonArray.getJSONObject(i)
 
-                chapters.addAll(pageChapters)
+            val chaptitle = Parser.unescapeEntities(item.getString("title"), true)
+            val chapterNumber = item.getInt("n_sort")
+            val chapurl = "$mainUrl/book/$bookId/chapter-$chapterNumber"
 
-                // Check if there is a "next" page button
-                val hasNext = document.selectFirst("li.page-item > a[rel=next]") != null
-                if (hasNext) {
-                    currentPage++
-                } else {
-                    fetchedAll = true
-                }
-            }
+            chapters.add(
+                newChapterData(chaptitle, fixUrl(chapurl))
+            )
         }
+
 
 
 
