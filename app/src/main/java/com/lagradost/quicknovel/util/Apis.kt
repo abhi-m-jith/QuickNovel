@@ -10,9 +10,11 @@ import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.StreamResponse
 import com.lagradost.quicknovel.providers.AnnasArchive
+import com.lagradost.quicknovel.providers.FanmtlProvider
 import com.lagradost.quicknovel.providers.FreewebnovelProvider
 import com.lagradost.quicknovel.providers.LibReadProvider
 import com.lagradost.quicknovel.providers.MVLEmpyrProvider
+import com.lagradost.quicknovel.providers.MtlbooksProvider
 import com.lagradost.quicknovel.providers.NovelBinProvider
 import com.lagradost.quicknovel.providers.NovelFireProvider
 import com.lagradost.quicknovel.providers.NovelFullProvider
@@ -46,6 +48,8 @@ class Apis {
             WebnovelFanficProvider(),
             NovelFireProvider(),
             WuxiaBoxProvider(),
+            FanmtlProvider(),
+            MtlbooksProvider()
 
         ).sortedBy { it.name }
 
