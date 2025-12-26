@@ -15,9 +15,12 @@ import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.lagradost.quicknovel.LibraryHelper
+import com.lagradost.quicknovel.LibraryHelper.getChapterFiltersList
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.FilterBottomSheetBinding
 import com.lagradost.quicknovel.databinding.FragmentMainpageBinding
@@ -115,6 +118,11 @@ class MainPageFragment : Fragment() {
                 //navController.navigate(R.id.navigation_homepage, Bundle(), MainActivity.navOptions)
                 // activity?.popCurrentPage()
                 activity?.onBackPressed()
+                val navController = findNavController()
+                if (navController.previousBackStackEntry?.destination?.id == R.id.navigation_homepage)
+                {
+                    viewModel.api.api.ResetFiltersandPage()
+                }
             }
             setOnMenuItemClickListener {
                 when (it.itemId) {
@@ -137,6 +145,7 @@ class MainPageFragment : Fragment() {
 
                 override fun onMenuItemActionCollapse(p0: MenuItem): Boolean {
                     viewModel.switchToMain()
+                    viewModel.ResetVales()
                     return true
                 }
             })
@@ -145,11 +154,12 @@ class MainPageFragment : Fragment() {
 
             searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(query: String): Boolean {
-                    viewModel.search(query)//MainActivity.activeAPI.search(query)
+                    viewModel.search(query,1)//MainActivity.activeAPI.search(query)
                     return true
                 }
 
                 override fun onQueryTextChange(newText: String): Boolean {
+                    viewModel.ResetVales()
                     return true
                 }
             })
@@ -176,9 +186,12 @@ class MainPageFragment : Fragment() {
                                     null,
                                     viewModel.currentMainCategory.value,
                                     viewModel.currentOrderBy.value,
-                                    viewModel.currentTag.value
+                                    viewModel.currentTag.value,
                                 )
                             }
+                        }
+                        else if (viewModel.hasQueryInput && !viewModel.api.api.isSearching && !viewModel.isLoadingSearch && visibleItemCount + pastVisiblesItems >= totalItemCount) {
+                            viewModel.search(viewModel.currentSearchQuery.toString(),viewModel.searchPage+1)
                         }
                     } else if (dy < -5) {
                         binding.mainpageFab.extend()
@@ -238,10 +251,19 @@ class MainPageFragment : Fragment() {
             if (!api.hasMainPage) {
                 return@setOnClickListener
             }
+            android.util.Log.d("FABDebug", "FAB clicked!")
 
             val bottomSheetDialog = BottomSheetDialog(requireContext())
             val binding = FilterBottomSheetBinding.inflate(layoutInflater, null, false)
             bottomSheetDialog.setContentView(binding.root)
+
+            val provider = viewModel.api.api
+            if(provider.isChapterCountFilterNeeded)
+            {
+                binding.filterChapterCountText.isVisible=true
+                binding.filterChapterCountSpinner.isVisible=true
+                viewModel.currentChapterCountFilter.value=provider.ChapterFilter.ordinal
+            }
 
             fun setUp(
                 data: List<Pair<String, String>>,
@@ -276,6 +298,8 @@ class MainPageFragment : Fragment() {
                 )
                 setUp(api.tags, filterTagText, filterTagSpinner, viewModel.currentTag.value)
 
+                setUp(getChapterFiltersList(),filterChapterCountText,filterChapterCountSpinner,viewModel.currentChapterCountFilter.value)
+
                 filterButton.setOnClickListener {
                     fun getId(spinner: Spinner): Int? {
                         return if (spinner.isVisible) spinner.selectedItemPosition else null
@@ -284,9 +308,14 @@ class MainPageFragment : Fragment() {
                     val generalId = getId(filterGeneralSpinner)
                     val orderId = getId(filterOrderSpinner)
                     val tagId = getId(filterTagSpinner)
+                    val chapterFilterID=getId(filterChapterCountSpinner)
                     isLoading = true
 
-                    viewModel.load(0, generalId, orderId, tagId)
+                    viewModel.load(0, generalId, orderId, tagId,chapterFilterID)
+
+                    provider.ChapterFilter= LibraryHelper.ChapterCountFilter.entries.toTypedArray()[chapterFilterID?:0]
+
+                    provider.FABFilterApplied()
 
                     bottomSheetDialog.dismiss()
                 }
@@ -302,6 +331,18 @@ class MainPageFragment : Fragment() {
         observe(viewModel.isInSearch) {
             isInSearch = it
             binding.mainpageFab.isGone = it // CANT USE FILTER ON A SEARCHERS
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        if(!viewModel.api.api.isOpeningBook)
+        {
+            viewModel.api.api.ResetFiltersandPage()
+        }
+        else
+        {
+            viewModel.api.api.isOpeningBook=false
         }
     }
 }

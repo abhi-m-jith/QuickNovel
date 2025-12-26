@@ -30,6 +30,14 @@ Adfree FOSS Android app for downloading novels. It also functions as an Epub rea
 - https://www.scribblehub.com
 - https://wtr-lab.com
 
+**New Provider added:** 
+- https://www.mvlempyr.com
+- https://www.webnovel.com/stories/fanfic
+- https://novelfire.net
+- https://www.wuxiabox.com
+- https://www.fanmtl.com
+- https://mtlbooks.com
+
 **Screenshoots:**
 
 <img src="./.github/home.jpg" height="400"/><img src="./.github/search.jpg" height="400"/><img src="./.github/downloads.jpg" height="400"/><img src="./.github/result.jpg" height="400"/><img src="./.github/reader.jpg" height="400"/>

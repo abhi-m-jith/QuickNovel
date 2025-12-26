@@ -1,5 +1,6 @@
 package com.lagradost.quicknovel.providers
 
+import android.util.Log
 import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
 import com.lagradost.quicknovel.LoadResponse
@@ -99,13 +100,18 @@ class NovelBinProvider : MainAPI() {
             list = document.select("div.list>div.row").mapNotNull { element ->
                 val a =
                     element.selectFirst("div > div > h3.novel-title > a") ?: return@mapNotNull null
+
+                val latestChapNum = element.selectFirst("div.col-xs-2.text-info a")
+                    ?.text()
+                    ?.let { Regex("""\d+""").find(it)?.value }
                 SearchResponse(
                     name = a.text(),
                     url = fixUrlNull(a.attr("href")) ?: return@mapNotNull null,
                     fixUrlNull(element.selectFirst("div > div > img")?.attr("data-src")?.replace( fullPosterRegex, "/novel/")),
                     null,
                     null,
-                    this.name
+                    this.name,
+                    totalChapterCount = latestChapNum
                 )
             })
     }
@@ -137,8 +143,12 @@ class NovelBinProvider : MainAPI() {
         return document.select("#list-page>.archive>.list>.row").mapNotNull { h ->
             val title = h.selectFirst(">div>div>.truyen-title>a")
                 ?: h.selectFirst(">div>div>.novel-title>a") ?: return@mapNotNull null
+            val latestChapNum = h.selectFirst("div.col-xs-2.text-info a")
+                ?.text()
+                ?.let { Regex("""\d+""").find(it)?.value }
             newSearchResponse(title.text(), title.attr("href") ?: return@mapNotNull null) {
                 posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src")?.replace( fullPosterRegex, "/novel/"))
+                totalChapterCount=latestChapNum
             }
         }
     }

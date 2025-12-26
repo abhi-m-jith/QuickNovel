@@ -24,6 +24,13 @@ abstract class MainAPI {
     val hasRateLimit: Boolean get() = rateLimitTime > 0L
     val rateLimitMutex: Mutex = Mutex()
 
+
+    open var isChapterCountFilterNeeded=false
+    open var ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
+    open var isOpeningBook=false
+    open var isSearching=false
+    open var isLastPage=false
+
     open val usesCloudFlareKiller = false
 
     // DECLARE HAS ACCESS TO MAIN PAGE INFORMATION
@@ -55,6 +62,9 @@ abstract class MainAPI {
     }
 
     open suspend fun search(query: String): List<SearchResponse>? {
+        return search(query,1)
+    }
+    open suspend fun search(query: String,page: Int = 1): List<SearchResponse>? {
         throw NotImplementedError()
     }
 
@@ -64,6 +74,15 @@ abstract class MainAPI {
 
     open suspend fun loadHtml(url: String): String? {
         throw NotImplementedError()
+    }
+
+    open fun FABFilterApplied()
+    {
+    }
+
+    open fun ResetFiltersandPage()
+    {
+        android.util.Log.d("RESET FILTER","Filter has been Reset")
     }
 
     /*open suspend fun loadEpub(link: DownloadLinkType): ByteArray {
@@ -180,7 +199,9 @@ data class SearchResponse(
     var rating: Int? = null,
     var latestChapter: String? = null,
     val apiName: String,
-    var posterHeaders: Map<String, String>? = null
+    var posterHeaders: Map<String, String>? = null,
+    var totalChapterCount:String? = null,
+    var bookReadStatus:String?=null,
 ) {
     val image get() = img(posterUrl, posterHeaders)
 }
@@ -189,14 +210,18 @@ fun MainAPI.newSearchResponse(
     name: String,
     url: String,
     fix: Boolean = true,
+    chapterCount: String? = null,
     initializer: SearchResponse.() -> Unit = { },
 ): SearchResponse {
+    val myReadStatus=LibraryHelper.getBookmarkForBook(name)
     val builder =
-        SearchResponse(name = name, url = if (fix) fixUrl(url) else url, apiName = this.name)
+        SearchResponse(name = name, url = if (fix) fixUrl(url) else url, apiName = this.name, totalChapterCount = chapterCount, bookReadStatus = myReadStatus)
     builder.initializer()
 
     return builder
 }
+
+
 
 enum class ReleaseStatus(@StringRes val resource: Int) {
     Ongoing(R.string.ongoing),
@@ -267,7 +292,7 @@ data class StreamResponse(
     override var status: ReleaseStatus? = null,
     override var posterHeaders: Map<String, String>? = null,
     var nextChapter: ChapterData? = null,
-    override var related: List<SearchResponse>? = null
+    override var related: List<SearchResponse>? = null,
 ) : LoadResponse
 
 suspend fun MainAPI.newStreamResponse(
@@ -281,7 +306,7 @@ suspend fun MainAPI.newStreamResponse(
         name = name,
         url = if (fix) fixUrl(url) else url,
         apiName = this.name,
-        data = data
+        data = data,
     )
     builder.initializer()
 
@@ -342,7 +367,7 @@ data class EpubResponse(
     var downloadLinks: List<DownloadLink>,
     var downloadExtractLinks: List<DownloadExtractLink>,
     override val apiName: String,
-    override var related: List<SearchResponse>? = null
+    override var related: List<SearchResponse>? = null,
 ) : LoadResponse
 
 suspend fun MainAPI.newEpubResponse(

@@ -1,5 +1,6 @@
 package com.lagradost.quicknovel.providers
 
+import android.util.Log
 import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
 import com.lagradost.quicknovel.LoadResponse
@@ -107,15 +108,20 @@ open class AllNovelProvider : MainAPI() {
         return HeadMainPageResponse(
             url,
             list = document.select("div.list>div.row").mapNotNull { element ->
-                val a =
-                    element.selectFirst("div > div > h3.truyen-title > a") ?: return@mapNotNull null
+                val a = element.selectFirst("div > div > h3.truyen-title > a") ?: return@mapNotNull null
+                val chapterText = element.selectFirst("span.chapter-text")?.text()
+                val chapterNumber = chapterText?.let {
+                    Regex("""Chapter\s+(\d+)""").find(it)?.groupValues?.get(1)
+                }
+
                 SearchResponse(
                     name = a.text(),
                     url = fixUrlNull(a.attr("href")) ?: return@mapNotNull null,
                     fixUrlNull(element.selectFirst("div > div > img")?.attr("src")),
                     null,
                     null,
-                    this.name
+                    this.name,
+                    totalChapterCount = chapterNumber
                 )
             })
     }
@@ -147,8 +153,13 @@ open class AllNovelProvider : MainAPI() {
         return document.select("#list-page>.archive>.list>.row").mapNotNull { h ->
             val title = h.selectFirst(">div>div>.truyen-title>a")
                 ?: h.selectFirst(">div>div>.novel-title>a") ?: return@mapNotNull null
+            val chapterText = h.selectFirst("span.chapter-text")?.text()
+            val chapterNumber = chapterText?.let {
+                Regex("""Chapter\s+(\d+)""").find(it)?.groupValues?.get(1)
+            }
             newSearchResponse(title.text(), title.attr("href") ?: return@mapNotNull null) {
-                posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src"))
+                posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src"));
+                totalChapterCount=chapterNumber
             }
         }
     }

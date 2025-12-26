@@ -1,9 +1,11 @@
 package com.lagradost.quicknovel.ui.search
 
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -60,6 +62,42 @@ class SearchAdapter2(
                     }
                 }
                 imageText.text = card.name
+
+
+
+
+                val InLibrary=card.bookReadStatus
+
+
+                if(InLibrary != null && InLibrary != "NONE")
+                {
+                    libraryOverlay.isVisible = true
+                    libraryOverlay.text = "$InLibrary"
+                    chapterCountOverlay.isVisible = false
+                }
+                else{
+                    libraryOverlay.isVisible=false
+
+                    // Only show chapter count overlay if it's not null/blank
+                    val chapterCountStr = card.totalChapterCount
+
+                    if (!chapterCountStr.isNullOrBlank()) {
+                        val chapterCount = chapterCountStr.toIntOrNull()
+
+                        chapterCountOverlay.isVisible = true
+                        chapterCountOverlay.text = if (chapterCount != null && chapterCount > 0) {
+                            "$chapterCount ch"
+                        }
+                        else {
+                            if(chapterCount==0){
+                                chapterCountOverlay.isVisible = false
+                            }
+                            "$chapterCountStr ch" // fallback to string like "V5 46"
+                        }
+                    } else {
+                        chapterCountOverlay.isVisible = false
+                    }
+                }
             }
         }
     }

@@ -20,7 +20,8 @@
             android:id="@+id/backgroundCard"
             android:foreground="?android:attr/selectableItemBackgroundBorderless"
             app:cardBackgroundColor="?attr/primaryGrayBackground">
-        <!-- USING CROP RATIO (182/268), centerCrop for fill -->
+
+        <!-- Image -->
         <ImageView
                 android:duplicateParentState="true"
                 android:id="@+id/imageView"
@@ -29,8 +30,24 @@
                 android:layout_height="match_parent"
                 android:contentDescription="@string/poster_descript" />
 
-        <!-- @color/textColor and NOT attr? -->
+        <!-- Chapter count overlay -->
+        <TextView
+                android:id="@+id/chapterCountOverlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:layout_margin="6dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:textColor="@android:color/white"
+                android:textSize="15sp"
+                android:background="@drawable/overlay_background_rounded"
+                android:text="123 ch"
+                tools:ignore="HardcodedText" />
 
+        <!-- Other overlays / progress bars -->
         <TextView
                 android:padding="3dp"
                 android:background="@drawable/download_add_bg"
@@ -42,7 +59,6 @@
 
         <androidx.core.widget.ContentLoadingProgressBar
                 android:visibility="gone"
-
                 android:indeterminate="true"
                 style="@android:style/Widget.Material.ProgressBar.Horizontal"
                 android:layout_gravity="bottom"
@@ -68,6 +84,7 @@
                 android:progressTint="@color/white"
                 android:layout_gravity="top|start" />
     </androidx.cardview.widget.CardView>
+
 
     <TextView
             android:id="@+id/imageText"

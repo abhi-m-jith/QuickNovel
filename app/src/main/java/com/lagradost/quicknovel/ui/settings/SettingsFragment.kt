@@ -518,7 +518,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             activity?.showBottomDialog(
                 prefNames.toList(),
                 prefValues.indexOf(current),
-                getString(R.string.rating_format),
+                getString(R.string.library_display_mode),
                 false,
                 {}) {
                 try {

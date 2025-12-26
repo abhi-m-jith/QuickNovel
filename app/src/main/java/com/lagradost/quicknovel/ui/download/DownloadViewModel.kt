@@ -1,6 +1,7 @@
 package com.lagradost.quicknovel.ui.download
 
 import android.content.DialogInterface
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.annotation.WorkerThread
 import androidx.appcompat.app.AlertDialog
@@ -29,7 +30,9 @@ import com.lagradost.quicknovel.DownloadActionType
 import com.lagradost.quicknovel.DownloadFileWorkManager
 import com.lagradost.quicknovel.DownloadProgressState
 import com.lagradost.quicknovel.DownloadState
+import com.lagradost.quicknovel.LibraryHelper.setLibraryBooks
 import com.lagradost.quicknovel.MainActivity
+import com.lagradost.quicknovel.MainActivity.Companion
 import com.lagradost.quicknovel.MainActivity.Companion.loadResult
 import com.lagradost.quicknovel.PreferenceDelegate
 import com.lagradost.quicknovel.R
@@ -241,6 +244,7 @@ class DownloadViewModel : ViewModel() {
     fun delete(card: ResultCached) {
         removeKey(RESULT_BOOKMARK, card.id.toString())
         removeKey(RESULT_BOOKMARK_STATE, card.id.toString())
+        MainActivity.context.setLibraryBooks()
         loadAllData(false)
     }
 

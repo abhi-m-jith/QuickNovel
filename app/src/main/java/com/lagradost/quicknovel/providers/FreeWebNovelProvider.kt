@@ -1,5 +1,6 @@
 package com.lagradost.quicknovel.providers
 
+import android.util.Log
 import com.lagradost.quicknovel.*
 import com.lagradost.quicknovel.MainActivity.Companion.app
 import org.jsoup.Jsoup
@@ -20,19 +21,43 @@ class FreewebnovelProvider : LibReadProvider() {
     ): HeadMainPageResponse {
         val url =
             if (tag.isNullOrBlank()) "$mainUrl/latest-release-novels/$page" else "$mainUrl/genres/$tag/$page"
+        Log.d("FreeWebNovel","$url")
         val document = app.get(url).document
         val headers = document.select("div.ul-list1.ul-list1-2.ss-custom > div.li-row")
         val returnValue = headers.mapNotNull { h ->
             val h3 = h.selectFirst("h3.tit > a") ?: return@mapNotNull null
+            val latestChap=h.select("div.item")[2].selectFirst("> div > a")?.text()
             newSearchResponse(
                 name = h3.attr("title"),
                 url = h3.attr("href") ?: return@mapNotNull null
             ) {
                 posterUrl = fixUrlNull(h.selectFirst("div.pic > a > img")?.attr("src"))
-                latestChapter = h.select("div.item")[2].selectFirst("> div > a")?.text()
+                latestChapter = latestChap
+                totalChapterCount=latestChap?.let { Regex("""\d+""").find(it)?.value }
             }
         }
         return HeadMainPageResponse(url, returnValue)
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+
+        val url ="$mainUrl/search?searchkey=$query"
+        val document = app.get(url).document // AJAX, MIGHT ADD QUICK SEARCH
+
+        val headers = document.select("div.ul-list1.ul-list1-2.ss-custom > div.li-row")
+        val returnValue = headers.mapNotNull { h ->
+            val h3 = h.selectFirst("h3.tit > a") ?: return@mapNotNull null
+            val latestChap=h.select("div.item")[2].selectFirst("> div > a")?.text()
+            newSearchResponse(
+                name = h3.attr("title"),
+                url = h3.attr("href") ?: return@mapNotNull null
+            ) {
+                posterUrl = fixUrlNull(h.selectFirst("div.pic > a > img")?.attr("src"))
+                latestChapter = latestChap
+                totalChapterCount=latestChap?.let { Regex("""\d+""").find(it)?.value }
+            }
+        }
+        return  returnValue
     }
 
     override suspend fun loadHtml(url: String): String? {

@@ -2,8 +2,8 @@
 
 <androidx.cardview.widget.CardView xmlns:app="http://schemas.android.com/apk/res-auto"
         xmlns:android="http://schemas.android.com/apk/res/android"
+        xmlns:tools="http://schemas.android.com/tools"
         android:foreground="?android:attr/selectableItemBackgroundBorderless"
-
         android:layout_margin="2dp"
         android:layout_width="114dp"
         android:layout_height="180dp"
@@ -12,37 +12,82 @@
         app:cardCornerRadius="@dimen/roundedImageRadius"
         android:id="@+id/backgroundCard"
         app:cardBackgroundColor="?attr/primaryBlackBackground">
-    <!-- USING CROP RATIO (182/268), centerCrop for fill -->
-    <ImageView
-            android:duplicateParentState="true"
-            android:id="@+id/imageView"
-            android:scaleType="centerCrop"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:foreground="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/poster_descript" />
 
-    <ImageView
-            android:focusable="false"
-            android:clickable="false"
+    <!-- Wrap image in FrameLayout to allow overlays -->
+    <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:src="@drawable/title_shadow"
-            android:layout_gravity="bottom"
-            android:contentDescription="@string/shadow_descript" />
-    <!-- @color/textColor and NOT attr? -->
-    <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:layout_gravity="bottom"
-            android:paddingBottom="5dp"
-            android:paddingTop="5dp"
-            android:textColor="@color/textColor"
-            android:id="@+id/imageText"
-            android:textStyle="bold"
-            android:maxLines="2"
-            android:paddingStart="5dp"
-            android:paddingEnd="5dp"
-            android:ellipsize="end" />
+            android:layout_height="match_parent">
+
+        <!-- Cover image -->
+        <ImageView
+                android:duplicateParentState="true"
+                android:id="@+id/imageView"
+                android:scaleType="centerCrop"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/poster_descript" />
+
+        <!-- Library overlay -->
+        <TextView
+                android:id="@+id/libraryOverlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_margin="6dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:background="@drawable/overlay_background_rounded"
+                android:text="Library"
+                android:visibility="gone"
+                tools:ignore="HardcodedText" />
+
+        <!-- Chapter count overlay -->
+        <TextView
+                android:id="@+id/chapterCountOverlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_margin="6dp"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:background="@drawable/overlay_background_rounded"
+                android:text="123 ch"
+                android:visibility="gone"
+                tools:ignore="HardcodedText" />
+
+        <!-- Shadow at bottom -->
+        <ImageView
+                android:focusable="false"
+                android:clickable="false"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:src="@drawable/title_shadow"
+                android:layout_gravity="bottom"
+                android:contentDescription="@string/shadow_descript" />
+
+        <!-- Title -->
+        <TextView
+                android:id="@+id/imageText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_gravity="bottom"
+                android:paddingBottom="5dp"
+                android:paddingTop="5dp"
+                android:textColor="@color/textColor"
+                android:textStyle="bold"
+                android:maxLines="2"
+                android:paddingStart="5dp"
+                android:paddingEnd="5dp"
+                android:ellipsize="end" />
+    </FrameLayout>
 </androidx.cardview.widget.CardView>

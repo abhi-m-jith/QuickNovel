@@ -27,7 +27,9 @@ import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_CHAPTER
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_READ_AT
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_SCROLL_CHAR
 import com.lagradost.quicknovel.HISTORY_FOLDER
+import com.lagradost.quicknovel.LibraryHelper.setLibraryBooks
 import com.lagradost.quicknovel.LoadResponse
+import com.lagradost.quicknovel.MainActivity
 import com.lagradost.quicknovel.PreferenceDelegate
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.RESULT_BOOKMARK
@@ -485,7 +487,7 @@ class ResultViewModel : ViewModel() {
                     load.rating,
                     (load as? StreamResponse)?.data?.size ?: 1,
                     System.currentTimeMillis(),
-                    synopsis = load.synopsis
+                    synopsis = load.synopsis,
                 )
             )
         }
@@ -546,7 +548,7 @@ class ResultViewModel : ViewModel() {
                 load.rating,
                 (load as? StreamResponse)?.data?.size ?: 1,
                 System.currentTimeMillis(),
-                synopsis = load.synopsis
+                synopsis = load.synopsis,
             )
         )
     }
@@ -559,6 +561,7 @@ class ResultViewModel : ViewModel() {
             )
             updateBookmarkData()
         }
+        MainActivity.context.setLibraryBooks()
 
         readState.postValue(ReadType.fromSpinner(state))
     }

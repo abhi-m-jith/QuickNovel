@@ -6,7 +6,6 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:layout_margin="2dp"
-
         android:focusable="true"
         android:clickable="true"
         android:id="@+id/search_result_root">
@@ -20,17 +19,58 @@
             app:cardCornerRadius="@dimen/roundedImageRadius"
             android:id="@+id/backgroundCard"
             app:cardBackgroundColor="?attr/primaryGrayBackground">
-        <!-- USING CROP RATIO (182/268), centerCrop for fill -->
-        <ImageView
-                android:duplicateParentState="true"
-                android:id="@+id/imageView"
-                android:scaleType="centerCrop"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:contentDescription="@string/poster_descript" />
 
+        <!-- Wrap image in a FrameLayout so we can overlay text -->
+        <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+            <!-- Main cover image -->
+            <ImageView
+                    android:duplicateParentState="true"
+                    android:id="@+id/imageView"
+                    android:scaleType="centerCrop"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:foreground="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/poster_descript" />
+
+            <!-- Chapter count overlay -->
+            <TextView
+                    android:id="@+id/chapterCountOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
+                    android:layout_margin="6dp"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:background="@drawable/overlay_background_rounded"
+                    android:text="123 ch"
+                    tools:ignore="HardcodedText" />
+            <!-- Library overlay -->
+            <TextView
+                    android:id="@+id/libraryOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
+                    android:layout_margin="6dp"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:textColor="@android:color/white"
+                    android:textSize="12sp"
+                    android:background="@drawable/overlay_background_rounded"
+                    android:text="Library"
+                    tools:ignore="HardcodedText" />
+        </FrameLayout>
     </androidx.cardview.widget.CardView>
 
+    <!-- Novel title -->
     <TextView
             android:id="@+id/imageText"
             android:layout_width="match_parent"

@@ -1,5 +1,6 @@
 package com.lagradost.quicknovel.ui.mainpage
 
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -89,6 +90,39 @@ class MainAdapter2(
             }
 
             imageText.text = item.name
+
+            val InLibrary=item.bookReadStatus
+
+            if(InLibrary != null && InLibrary != "NONE")
+            {
+                libraryOverlay.isVisible = true
+                libraryOverlay.text = "$InLibrary"
+                chapterCountOverlay.isVisible = false
+            }
+            else{
+                libraryOverlay.isVisible=false
+
+                // Only show chapter count overlay if it's not null/blank
+                val chapterCountStr = item.totalChapterCount
+
+                if (!chapterCountStr.isNullOrBlank()) {
+                    val chapterCount = chapterCountStr.toIntOrNull()
+
+                    chapterCountOverlay.isVisible = true
+                    chapterCountOverlay.text = if (chapterCount != null && chapterCount > 0) {
+                        "$chapterCount ch"
+                    }
+                    else {
+                        if(chapterCount==0){
+                            chapterCountOverlay.isVisible = false
+                        }
+                        "$chapterCountStr ch" // fallback to string like "V5 46"
+                    }
+                } else {
+                    chapterCountOverlay.isVisible = false
+                }
+            }
+
         }
     }
 
