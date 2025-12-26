@@ -18,6 +18,7 @@
             app:cardElevation="0dp"
             app:cardCornerRadius="@dimen/roundedImageRadius"
             android:id="@+id/backgroundCard"
+            android:foreground="?android:attr/selectableItemBackgroundBorderless"
             app:cardBackgroundColor="?attr/primaryGrayBackground">
 
         <!-- Image -->
@@ -71,6 +72,7 @@
 
         <androidx.core.widget.ContentLoadingProgressBar
                 android:visibility="gone"
+                tools:visibility="visible"
                 android:padding="3dp"
                 android:background="@drawable/download_add_bg"
                 android:id="@+id/download_update_loading"

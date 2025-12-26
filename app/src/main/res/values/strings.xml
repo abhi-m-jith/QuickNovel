@@ -209,6 +209,7 @@
     <string name="download_sort">Download count</string>
     <string name="download_perc">Download percentage</string>
     <string name="recently_updated_sort">Recently updated</string>
+    <string name="chapter_sort">Chapter</string>
 
     <string name="alpha_sort_az">Alphabetical (A-Z)</string>
     <string name="alpha_sort_za">Alphabetical (Z-A)</string>
@@ -229,4 +230,23 @@
     <string name="sleep_format_stop">TTS will stop in %d min</string>
     <string name="google_translate">Google translate</string>
     <string name="start_chapter">Skipped chapters</string>
+    <string name="tts_speed">TTS Speed</string>
+    <string name="tts_pitch">TTS Pitch</string>
+    <string name="show_logcat_key" translatable="false">show_logcat_key</string>
+    <string name="close">Close</string>
+    <string name="clear">Clear</string>
+    <string name="copylog">Copy</string>
+    <string name="save">Save</string>
+
+    <string name="toast_copied">copied!</string>
+    <string name="clipboard_too_large">Too much text. Unable to save to clipboard.</string>
+    <string name="clipboard_permission_error">Error accessing Clipboard, Please try again.</string>
+    <string name="clipboard_unknown_error">Error copying, Please copy logcat and contact app support.</string>
+    <string name="show_log_cat">Show Logcat 🐈</string>
+    <string name="unread">Unread</string>
+    <string name="bookmarks">Bookmarks</string>
+    <string name="read">Read</string>
+    <string name="import_epub">Import epub</string>
+    <string name="show_authors_notes">Show authors notes</string>
+
 </resources>

@@ -3,6 +3,7 @@ package com.lagradost.quicknovel
 import androidx.annotation.StringRes
 import androidx.annotation.WorkerThread
 import com.lagradost.nicehttp.NiceResponse
+import com.lagradost.quicknovel.CommonActivity.activity
 import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.ui.UiImage
@@ -263,6 +264,17 @@ interface LoadResponse {
     val image: UiImage? get() = img(url = posterUrl, headers = posterHeaders)
     val apiName: String
     var related: List<SearchResponse>?
+
+    fun downloadImage(): UiImage? {
+        val act = activity
+        val bitmap = BookDownloader2Helper.getCachedBitmap(act, apiName, author, name)
+
+        return if (bitmap == null) {
+            img(url = posterUrl, headers = posterHeaders)
+        } else {
+            UiImage.Bitmap(bitmap)
+        }
+    }
 }
 
 data class StreamResponse(

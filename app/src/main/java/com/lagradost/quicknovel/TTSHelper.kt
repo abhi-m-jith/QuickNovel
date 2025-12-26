@@ -60,9 +60,26 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
     private var TTSStartSpeakId = 0
     private var TTSEndSpeakId = 0
 
+    private var speed : Float = 1.0f
+    private var pitch : Float = 1.0f
+
+    fun isValidTTS() : Boolean {
+        return tts != null
+    }
+
     private fun clearTTS(tts: TextToSpeech) {
         tts.stop()
         TTSQueue = null
+    }
+
+    fun setSpeed(speed : Float) {
+        this.speed = speed
+        tts?.setSpeechRate(speed)
+    }
+
+    fun setPitch(pitch : Float) {
+        this.pitch = pitch
+        tts?.setPitch(pitch)
     }
 
     fun setLanguage(locale: Locale?) {
@@ -215,6 +232,10 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
                             }
                         }
                     })
+
+                    pendingTTS.setPitch(pitch)
+                    pendingTTS.setSpeechRate(speed)
+
                     tts = pendingTTS
                     tts?.let(callback)
                 }
@@ -327,7 +348,8 @@ abstract class SpanDisplay {
 data class ChapterStartSpanned(
     override val index: Int,
     override val innerIndex: Int,
-    val name: UiText
+    val name: UiText,
+    val canReload: Boolean,
 ) : SpanDisplay() {
     override fun id(): Long {
         return generateId(1, index, 0, 0)
@@ -463,27 +485,31 @@ object TTSHelper {
         while (nextIndex != -1) {
             // don't include duplicate newlines
             if (currentOffset != nextIndex) {
-                spans.add(
-                    TextSpan(
-                        unsegmented.subSequence(currentOffset, nextIndex) as Spanned,
-                        currentOffset,
-                        nextIndex,
-                        index,
-                        innerIndex
+                // Do not include blank text
+                val text = unsegmented.subSequence(currentOffset, nextIndex) as Spanned
+                if (!text.isBlank()) {
+                    spans.add(
+                        TextSpan(
+                            text,
+                            currentOffset,
+                            nextIndex,
+                            index,
+                            innerIndex
+                        )
                     )
-                )
-                innerIndex++
+                    innerIndex++
+                }
             }
 
             currentOffset = nextIndex + 1
-
             nextIndex = unsegmented.indexOf('\n', currentOffset)
         }
 
-        if (currentOffset != unsegmented.length)
+        val text = unsegmented.subSequence(currentOffset, unsegmented.length) as Spanned
+        if (currentOffset != unsegmented.length && !text.isBlank())
             spans.add(
                 TextSpan(
-                    unsegmented.subSequence(currentOffset, unsegmented.length) as Spanned,
+                    text,
                     currentOffset,
                     unsegmented.length,
                     index,
@@ -513,12 +539,16 @@ object TTSHelper {
         return loc
     }
 
-    fun preParseHtml(text: String): String {
+    fun preParseHtml(text: String, authorNotes : Boolean): String {
         val document = Jsoup.parse(text)
 
         // REMOVE USELESS STUFF THAT WONT BE USED IN A NORMAL TXT
         document.select("style").remove()
         document.select("script").remove()
+
+        if(!authorNotes) {
+            document.select("div.qnauthornotecontainer").remove()
+        }
 
         return document.html()
             // this makes tables readable, more or less places a newline between rows

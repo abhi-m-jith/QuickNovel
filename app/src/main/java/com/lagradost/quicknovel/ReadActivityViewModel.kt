@@ -6,7 +6,6 @@ import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
-import android.graphics.drawable.Drawable
 import android.media.MediaPlayer
 import android.speech.tts.Voice
 import android.text.Spanned
@@ -20,10 +19,8 @@ import androidx.core.text.toSpanned
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.bumptech.glide.Glide
-import com.bumptech.glide.RequestBuilder
-import com.bumptech.glide.load.model.GlideUrl
-import com.bumptech.glide.request.target.Target
+import coil3.request.Disposable
+import coil3.request.ImageRequest
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.google.android.gms.tasks.Tasks
@@ -62,6 +59,8 @@ import com.lagradost.quicknovel.ui.toScroll
 import com.lagradost.quicknovel.ui.toUiText
 import com.lagradost.quicknovel.ui.txt
 import com.lagradost.quicknovel.util.Apis
+import com.lagradost.quicknovel.util.CoilImagesPlugin
+import com.lagradost.quicknovel.util.CoilImagesPlugin.CoilStore
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.Coroutines.runOnMainThread
 import com.lagradost.safefile.closeQuietly
@@ -73,7 +72,6 @@ import io.noties.markwon.html.HtmlPlugin
 import io.noties.markwon.image.AsyncDrawable
 import io.noties.markwon.image.AsyncDrawableSpan
 import io.noties.markwon.image.ImageSizeResolver
-import io.noties.markwon.image.glide.GlideImagesPlugin
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -525,6 +523,16 @@ class ReadActivityViewModel : ViewModel() {
         reloadChapter(currentIndex)
     }
 
+    fun refreshChapters() = ioSafe {
+        hasExpanded.clear() // will unfuck the rest
+        chapterMutex.withLock {
+            chapterData.clear()
+        }
+        _loadingStatus.postValue(Resource.Loading())
+        loadIndividualChapter(currentIndex, reload = false, notify = true, postLoading = true)
+        updateReadArea(seekToDesired = true)
+    }
+
     private suspend fun updateIndexAsync(
         index: Int,
         notify: Boolean = true,
@@ -614,11 +622,12 @@ class ReadActivityViewModel : ViewModel() {
     private fun updateReadArea(seekToDesired: Boolean = false) {
         val cIndex = currentIndex
         val chapters = ArrayList<SpanDisplay>()
+        val canReload = this.book.canReload
         when (readerType) {
             ReadingType.DEFAULT, ReadingType.INF_SCROLL -> {
                 for (idx in cIndex - chapterPaddingBottom..cIndex + chapterPaddingTop) {
                     if (idx < chaptersTitlesInternal.size && idx >= 0)
-                        chapters.add(ChapterStartSpanned(idx, 0, chaptersTitlesInternal[idx]))
+                        chapters.add(ChapterStartSpanned(idx, 0, chaptersTitlesInternal[idx], canReload))
                     chapters.addAll(chapterIdxToSpanDisplay(idx))
                 }
             }
@@ -629,7 +638,7 @@ class ReadActivityViewModel : ViewModel() {
                 }
 
                 chaptersTitlesInternal.getOrNull(cIndex)?.let { text ->
-                    chapters.add(ChapterStartSpanned(cIndex, 0, text))
+                    chapters.add(ChapterStartSpanned(cIndex, 0, text, canReload))
                 }
 
                 chapters.addAll(chapterIdxToSpanDisplay(cIndex))
@@ -645,7 +654,7 @@ class ReadActivityViewModel : ViewModel() {
                 }
 
                 chaptersTitlesInternal.getOrNull(cIndex)?.let { text ->
-                    chapters.add(ChapterStartSpanned(cIndex, 0, text))
+                    chapters.add(ChapterStartSpanned(cIndex, 0, text, canReload))
                 }
 
                 chapters.addAll(chapterIdxToSpanDisplay(cIndex))
@@ -741,7 +750,7 @@ class ReadActivityViewModel : ViewModel() {
             val data = safeApiCall {
                 book.getChapterData(index, reload)
             }.map { text ->
-                val rawText = preParseHtml(text)
+                val rawText = preParseHtml(text, authorNotes)
                 // val renderedBuilder = SpannableStringBuilder()
                 // val lengths : IntArray
                 //val nodes : Array<Node>
@@ -1162,43 +1171,33 @@ class ReadActivityViewModel : ViewModel() {
         _title.postValue(book.title())
 
         updateChapters()
+        val imageLoader : coil3.ImageLoader = coil3.SingletonImageLoader.get(context)
 
-        markwon = Markwon.builder(context) // automatically create Glide instance
-            //.usePlugin(GlideImagesPlugin.create(context)) // use supplied Glide instance
-            //.usePlugin(GlideImagesPlugin.create(Glide.with(context))) // if you need more control
+        val coilStore = object : CoilStore {
+            override fun load(drawable: AsyncDrawable): ImageRequest {
+                val newUrl = drawable.destination.substringAfter("&url=")
+                val url =
+                    book.resolveUrl(
+                        if (newUrl.length > 8) { // we assume that it is not a stub url by length > 8
+                            URLDecoder.decode(newUrl)
+                        } else {
+                            drawable.destination
+                        }
+                    )
+
+                return ImageRequest.Builder(context)
+                    .data(url)
+                    .build()
+            }
+
+            override fun cancel(disposable: Disposable) {
+                disposable.dispose()
+            }
+        }
+
+        markwon = Markwon.builder(context)
             .usePlugin(HtmlPlugin.create { plugin -> plugin.excludeDefaults(false) })
-            .usePlugin(GlideImagesPlugin.create(object : GlideImagesPlugin.GlideStore {
-                override fun load(drawable: AsyncDrawable): RequestBuilder<Drawable> {
-                    return try {
-
-                        val newUrl = drawable.destination.substringAfter("&url=")
-                        val url =
-                            book.resolveUrl(
-                                if (newUrl.length > 8) { // we assume that it is not a stub url by length > 8
-                                    URLDecoder.decode(newUrl)
-                                } else {
-                                    drawable.destination
-                                }
-                            )
-
-                        Glide.with(context)
-                            .load(GlideUrl(url) { mapOf("user-agent" to USER_AGENT) })
-
-                    } catch (e: Exception) {
-                        logError(e)
-                        Glide.with(context)
-                            .load(R.drawable.books_emoji) // might crash :)
-                    }
-                }
-
-                override fun cancel(target: Target<*>) {
-                    try {
-                        Glide.with(context).clear(target)
-                    } catch (e: Exception) {
-                        logError(e)
-                    }
-                }
-            }))
+            .usePlugin(CoilImagesPlugin.create(context,coilStore,imageLoader))
             .usePlugin(object :
                 AbstractMarkwonPlugin() {
                 override fun configureConfiguration(builder: MarkwonConfiguration.Builder) {
@@ -1305,6 +1304,8 @@ class ReadActivityViewModel : ViewModel() {
             if (ttsThreadMutex.isLocked) return@coroutineScope
             ttsThreadMutex.withLock {
                 ttsSession.register()
+                ttsSession.setSpeed(ttsSpeed)
+                ttsSession.setPitch(ttsPitch)
 
                 var ttsInnerIndex = 0 // this inner index is different from what is set
                 var index = dIndex.index
@@ -1323,8 +1324,12 @@ class ReadActivityViewModel : ViewModel() {
                     }
 
                     val idx = lines.indexOfFirst { it.startChar >= startChar }
-                    if (idx != -1)
+                    if (idx != -1) {
                         ttsInnerIndex = idx
+                    } else {
+                        // In case we are at the very last thing, then goto the next chapter
+                        index++
+                    }
                 }
                 while (isActive && currentTTSStatus != TTSHelper.TTSStatus.IsStopped) {
                     val lines =
@@ -1426,6 +1431,11 @@ class ReadActivityViewModel : ViewModel() {
                         ) {
                             currentTTSStatus != TTSHelper.TTSStatus.IsRunning || pendingTTSSkip != 0
                         }
+
+                        if (!ttsSession.isValidTTS()) {
+                            currentTTSStatus = TTSHelper.TTSStatus.IsStopped
+                        }
+
                         ttsSession.waitForOr(waitFor, {
                             currentTTSStatus != TTSHelper.TTSStatus.IsRunning || pendingTTSSkip != 0
                         }) {
@@ -1585,7 +1595,7 @@ class ReadActivityViewModel : ViewModel() {
         _loadingStatus.postValue(Resource.Loading())
 
         // load the chapters
-        updateIndexAsync(index, notify = false)
+        updateIndexAsync(index, notify = false, postLoading = true)
         // set the keys
         setKey(EPUB_CURRENT_POSITION, book.title(), index)
         setKey(EPUB_CURRENT_POSITION_SCROLL_CHAR, book.title(), 0)
@@ -1667,7 +1677,28 @@ class ReadActivityViewModel : ViewModel() {
 
 
     var scrollWithVolume by PreferenceDelegate(EPUB_SCROLL_VOL, true, Boolean::class)
+    var authorNotes by PreferenceDelegate(EPUB_AUTHOR_NOTES, true, Boolean::class)
     var ttsLock by PreferenceDelegate(EPUB_TTS_LOCK, true, Boolean::class)
+    //var ttsOSSpeed by PreferenceDelegate(EPUB_TTS_OS_SPEED, true, Boolean::class)
+
+    private var ttsSpeedKey by PreferenceDelegate(EPUB_TTS_SET_SPEED, 1.0f, Float::class)
+    private var ttsPitchKey by PreferenceDelegate(EPUB_TTS_SET_PITCH, 1.0f, Float::class)
+
+    var ttsSpeed: Float
+        get() = ttsSpeedKey
+        set(value) {
+            ttsSession.setSpeed(value)
+            ttsSpeedKey = value
+        }
+
+    var ttsPitch: Float
+        get() = ttsPitchKey
+        set(value) {
+            ttsSession.setPitch(value)
+            ttsPitchKey = value
+        }
+
+
     val textFontLive: MutableLiveData<String> = MutableLiveData(null)
     var textFont by PreferenceDelegateLiveView(EPUB_FONT, "", String::class, textFontLive)
     val textSizeLive: MutableLiveData<Int> = MutableLiveData(null)

@@ -3,6 +3,8 @@ package com.lagradost.quicknovel.util
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.Resources
 import android.graphics.Color
@@ -10,15 +12,19 @@ import android.graphics.drawable.ColorDrawable
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
+import android.os.TransactionTooLargeException
 import android.text.Spanned
+import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.view.Window
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.ImageView
+import android.widget.Toast.LENGTH_LONG
 import androidx.annotation.AttrRes
 import androidx.annotation.ColorInt
 import androidx.annotation.DrawableRes
@@ -27,6 +33,7 @@ import androidx.appcompat.view.ContextThemeWrapper
 import androidx.appcompat.view.menu.MenuBuilder
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.ContextCompat
+import androidx.core.content.getSystemService
 import androidx.core.graphics.alpha
 import androidx.core.graphics.blue
 import androidx.core.graphics.green
@@ -36,24 +43,26 @@ import androidx.core.text.toSpanned
 import androidx.core.view.forEach
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
-import com.bumptech.glide.load.engine.DiskCacheStrategy
-import com.bumptech.glide.load.model.GlideUrl
-import com.bumptech.glide.load.model.LazyHeaders
-import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
-import com.bumptech.glide.request.RequestOptions.bitmapTransform
+import coil3.dispose
+import coil3.request.transformations
+import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
+import com.lagradost.quicknovel.BaseApplication.Companion.context
 import com.lagradost.quicknovel.CommonActivity
+import com.lagradost.quicknovel.CommonActivity.showToast
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.databinding.ImageLayoutBinding
 import com.lagradost.quicknovel.mvvm.logError
+import com.lagradost.quicknovel.ui.UiText
+import com.lagradost.quicknovel.ui.txt
 import io.noties.markwon.image.AsyncDrawable
-import jp.wasabeef.glide.transformations.BlurTransformation
 import java.io.File
 import java.text.CharacterIterator
 import java.text.StringCharacterIterator
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.math.sign
+import androidx.core.graphics.drawable.toDrawable
 
 //import androidx.palette.graphics.Palette
 
@@ -73,8 +82,9 @@ fun Long.divCeil(other: Long): Long {
 
 object UIHelper {
     fun String?.html(): Spanned {
-        return getHtmlText(this?.trim()?.replace("\n","<br>") ?: return "".toSpanned())
+        return getHtmlText(this?.trim()?.replace("\n", "<br>") ?: return "".toSpanned())
     }
+
     private fun getHtmlText(text: String): Spanned {
         return try {
             // I have no idea if this can throw any error, but I don't want to try
@@ -84,6 +94,36 @@ object UIHelper {
         } catch (e: Exception) {
             logError(e)
             text.toSpanned()
+        }
+    }
+
+    fun clipboardHelper(label: UiText, text: CharSequence) {
+        val ctx = context ?: return
+        try {
+            ctx.let {
+                val clip = ClipData.newPlainText(label.asString(ctx), text)
+                val labelSuffix = txt(R.string.toast_copied).asString(ctx)
+                ctx.getSystemService<ClipboardManager>()?.setPrimaryClip(clip)
+
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                    showToast("${label.asString(ctx)} $labelSuffix")
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e("ClipboardService", "$t")
+            when (t) {
+                is SecurityException -> {
+                    showToast(R.string.clipboard_permission_error)
+                }
+
+                is TransactionTooLargeException -> {
+                    showToast(R.string.clipboard_too_large)
+                }
+
+                else -> {
+                    showToast(R.string.clipboard_unknown_error, LENGTH_LONG)
+                }
+            }
         }
     }
 
@@ -106,7 +146,7 @@ object UIHelper {
         }
     }
 
-    fun bindImage(imageView: ImageView, img : AsyncDrawable) {
+    fun bindImage(imageView: ImageView, img: AsyncDrawable) {
         val url = img.destination
         img.result?.let { drawable ->
             imageView.setImageDrawable(drawable)
@@ -115,13 +155,14 @@ object UIHelper {
         }
     }
 
-    fun showImage(context : Context?, image : UiImage) {
-        if (context == null) return
-        val settingsDialog = Dialog(context)
-        settingsDialog.window!!.requestFeature(Window.FEATURE_NO_TITLE)
-        settingsDialog.window!!.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+    fun showImageDialog(context: Context, apply: (ImageView) -> Unit) {
+        val settingsDialog = Dialog(context, R.style.AlertDialogCustomTransparentFullscreen)
+        //settingsDialog.window?.apply {
+        //    requestFeature(Window.FEATURE_NO_TITLE)
+        //}
         val binding = ImageLayoutBinding.inflate(LayoutInflater.from(context))
-        binding.image.setImage(image)
+        apply(binding.image)
 
         binding.image.setOnClickListener {
             settingsDialog.dismissSafe(CommonActivity.activity)
@@ -133,22 +174,18 @@ object UIHelper {
         settingsDialog.show()
     }
 
-    fun showImage(context : Context?, drawable : AsyncDrawable) {
+    fun showImage(context: Context?, image: UiImage) {
         if (context == null) return
-        val settingsDialog = Dialog(context)
-        settingsDialog.window!!.requestFeature(Window.FEATURE_NO_TITLE)
-        settingsDialog.window!!.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        val binding = ImageLayoutBinding.inflate(LayoutInflater.from(context))
-        bindImage(binding.image,drawable)
-
-        binding.image.setOnClickListener {
-            settingsDialog.dismissSafe(CommonActivity.activity)
+        showImageDialog(context) {
+            it.setImage(image)
         }
-        settingsDialog.setContentView(
-            binding.root
-        )
+    }
 
-        settingsDialog.show()
+    fun showImage(context: Context?, drawable: AsyncDrawable) {
+        if (context == null) return
+        showImageDialog(context) {
+            bindImage(it, drawable)
+        }
     }
 
     fun FragmentActivity.popCurrentPage() {
@@ -180,6 +217,7 @@ object UIHelper {
         attributes.recycle()
         return color
     }
+
     fun ImageView?.setImage(
         url: String?,
         headers: Map<String, String>? = null,
@@ -213,19 +251,47 @@ object UIHelper {
 
         //colorCallback: ((Palette) -> Unit)? = null,
     ): Boolean {
-        if (this == null || uiImage == null) return false
+        if (this == null || uiImage == null) {
+            this?.dispose()
+            return false
+        }
+        val transformations = if (radius > 0) listOf(
+            BlurTransformation(
+                scale = sample.toFloat(),
+                radius = radius
+            )
+        ) else emptyList()
 
-        val (glideImage, _) =
-            (uiImage as? UiImage.Drawable)?.resId?.let {
-                it to it.toString()
-            } ?: (uiImage as? UiImage.Image)?.let { image ->
+        when (uiImage) {
+            is UiImage.Image -> {
+                this.loadImage(uiImage.url, uiImage.headers) {
+                    transformations(transformations)
+                }
+            }
+
+            is UiImage.Bitmap -> {
+                this.loadImage(uiImage.bitmap) {
+                    transformations(transformations)
+                }
+            }
+
+            is UiImage.Drawable -> {
+                this.loadImage(uiImage.resId) {
+                    transformations(transformations)
+                }
+            }
+        }
+        return true
+        /*val glideImage=
+            (uiImage as? UiImage.Drawable)?.resId ?: (uiImage as? UiImage.Bitmap)?.bitmap
+            ?: (uiImage as? UiImage.Image)?.let { image ->
                 val glideHeaders = LazyHeaders.Builder().apply {
                     image.headers?.forEach {
                         addHeader(it.key, it.value)
                     }
                 }.build()
 
-                GlideUrl(image.url, glideHeaders) to image.url
+                GlideUrl(image.url, glideHeaders)
             } ?: return false
 
         return try {
@@ -285,7 +351,7 @@ object UIHelper {
         } catch (e: Exception) {
             logError(e)
             false
-        }
+        }*/
     }
 
     /*fun ImageView?.setImage(
@@ -341,7 +407,7 @@ object UIHelper {
         }
     }*/
 
-    val systemFonts : Array<File> by lazy {
+    val systemFonts: Array<File> by lazy {
         getAllFonts()
     }
 
@@ -424,7 +490,13 @@ object UIHelper {
         noinline initMenu: (Menu.() -> Unit)? = null,
         noinline onMenuItemClick: MenuItem.() -> Unit,
     ): PopupMenu {
-        val popup = PopupMenu(context, this, Gravity.NO_GRAVITY, androidx.appcompat.R.attr.actionOverflowMenuStyle, 0)
+        val popup = PopupMenu(
+            context,
+            this,
+            Gravity.NO_GRAVITY,
+            androidx.appcompat.R.attr.actionOverflowMenuStyle,
+            0
+        )
         popup.menuInflater.inflate(menuRes, popup.menu)
 
         if (initMenu != null) {
@@ -454,7 +526,13 @@ object UIHelper {
         noinline onMenuItemClick: MenuItem.() -> Unit,
     ): PopupMenu {
         val ctw = ContextThemeWrapper(context, R.style.PopupMenu)
-        val popup = PopupMenu(ctw, this, Gravity.NO_GRAVITY, androidx.appcompat.R.attr.actionOverflowMenuStyle, 0)
+        val popup = PopupMenu(
+            ctw,
+            this,
+            Gravity.NO_GRAVITY,
+            androidx.appcompat.R.attr.actionOverflowMenuStyle,
+            0
+        )
 
         items.forEach { (id, stringRes) ->
             popup.menu.add(0, id, 0, stringRes)
@@ -491,7 +569,13 @@ object UIHelper {
         noinline onMenuItemClick: MenuItem.() -> Unit,
     ): PopupMenu {
         val ctw = ContextThemeWrapper(context, R.style.PopupMenu)
-        val popup = PopupMenu(ctw, this, Gravity.NO_GRAVITY, androidx.appcompat.R.attr.actionOverflowMenuStyle, 0)
+        val popup = PopupMenu(
+            ctw,
+            this,
+            Gravity.NO_GRAVITY,
+            androidx.appcompat.R.attr.actionOverflowMenuStyle,
+            0
+        )
 
         items.forEach { (id, icon, stringRes) ->
             popup.menu.add(0, id, 0, stringRes).setIcon(icon)

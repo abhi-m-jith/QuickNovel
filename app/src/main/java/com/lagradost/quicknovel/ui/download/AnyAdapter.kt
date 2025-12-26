@@ -2,23 +2,25 @@ package com.lagradost.quicknovel.ui.download
 
 import android.animation.ObjectAnimator
 import android.util.Log
+import android.annotation.SuppressLint
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.LinearLayout
+import androidx.core.view.isGone
 import androidx.core.view.isVisible
-import androidx.fragment.app.Fragment
-import androidx.viewbinding.ViewBinding
 import com.lagradost.quicknovel.BaseApplication.Companion.getKey
 import com.lagradost.quicknovel.DOWNLOAD_EPUB_SIZE
 import com.lagradost.quicknovel.DownloadState
 import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.R
+import com.lagradost.quicknovel.databinding.DownloadImportBinding
+import com.lagradost.quicknovel.databinding.DownloadImportCardBinding
 import com.lagradost.quicknovel.databinding.DownloadResultCompactBinding
 import com.lagradost.quicknovel.databinding.DownloadResultGridBinding
 import com.lagradost.quicknovel.databinding.HistoryResultCompactBinding
-import com.lagradost.quicknovel.ui.BaseAdapter
 import com.lagradost.quicknovel.ui.BaseDiffCallback
+import com.lagradost.quicknovel.ui.NoStateAdapter
 import com.lagradost.quicknovel.ui.ViewHolderState
 import com.lagradost.quicknovel.util.ResultCached
 import com.lagradost.quicknovel.util.SettingsHelper.getDownloadIsCompact
@@ -26,34 +28,90 @@ import com.lagradost.quicknovel.util.UIHelper.setImage
 import com.lagradost.quicknovel.widget.AutofitRecyclerView
 import kotlin.math.roundToInt
 
-class AnyState(
-    view: ViewBinding
-) : ViewHolderState<Nothing>(view)
-
 class AnyAdapter(
     private val resView: AutofitRecyclerView,
     private val downloadViewModel: DownloadViewModel,
-    fragment: Fragment,
-    id: Int
-) : BaseAdapter<Any, Nothing>(
-    fragment, id,
+) : NoStateAdapter<Any>(
     diffCallback = BaseDiffCallback(
         itemSame = { a, b ->
             a.hashCode() == b.hashCode()
         },
         contentSame = { a, b ->
-            a === b
+            a == b
         }
     )
 ) {
-    override val detectMoves: Boolean? = null
-
     companion object {
         const val RESULT_CACHED: Int = 1
         const val DOWNLOAD_DATA_LOADED: Int = 2
     }
 
-    override fun onCreateCustom(parent: ViewGroup, viewType: Int): ViewHolderState<Nothing> {
+    override fun getItemId(position: Int): Long {
+        return when (val item = getItemOrNull(position)) {
+            is ResultCached -> item.id.toLong()
+            is DownloadFragment.DownloadDataLoaded -> item.id.toLong()
+            else -> 0L
+        }
+    }
+
+    override fun onCreateFooter(parent: ViewGroup): ViewHolderState<Any> {
+        val compact = parent.context.getDownloadIsCompact()
+
+        return ViewHolderState(
+            if(compact) {
+                DownloadImportBinding.inflate(
+                    LayoutInflater.from(parent.context),
+                    parent,
+                    false
+                )
+            } else {
+                DownloadImportCardBinding.inflate(
+                    LayoutInflater.from(parent.context),
+                    parent,
+                    false
+                )
+            }
+
+        )
+    }
+
+    override fun onClearView(holder: ViewHolderState<Any>) {
+        when(val binding = holder.view) {
+            is DownloadResultGridBinding -> {
+                clearImage(binding.imageView)
+            }
+            is HistoryResultCompactBinding -> {
+                clearImage(binding.imageView)
+            }
+            is DownloadResultCompactBinding -> {
+                clearImage(binding.imageView)
+            }
+        }
+    }
+
+    override fun onBindFooter(holder: ViewHolderState<Any>) {
+        when(val binding = holder.view) {
+            is DownloadImportBinding -> {
+                binding.backgroundCard.setOnClickListener {
+                    downloadViewModel.importEpub()
+                }
+            }
+            is DownloadImportCardBinding -> {
+                binding.backgroundCard.apply {
+                    setOnClickListener {
+                        downloadViewModel.importEpub()
+                    }
+                    val coverHeight: Int = (resView.itemWidth / 0.68).roundToInt()
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        coverHeight
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onCreateCustomContent(parent: ViewGroup, viewType: Int): ViewHolderState<Any> {
         val compact = parent.context.getDownloadIsCompact()
         val binding = when (viewType) {
             RESULT_CACHED -> {
@@ -91,10 +149,11 @@ class AnyAdapter(
             else -> throw NotImplementedError()
         }
 
-        return AnyState(binding)
+        return ViewHolderState(binding)
     }
 
-    override fun onBindContent(holder: ViewHolderState<Nothing>, item: Any, position: Int) {
+    @SuppressLint("SetTextI18n")
+    override fun onBindContent(holder: ViewHolderState<Any>, item: Any, position: Int) {
         when (val view = holder.view) {
             is HistoryResultCompactBinding -> {
                 val card = item as ResultCached
@@ -140,25 +199,15 @@ class AnyAdapter(
                                 }
                             }
 
-                            val same = imageText.text == item.name
                             downloadProgressbarIndeterment.isVisible = item.generating
                             val showDownloadLoading = item.state == DownloadState.IsPending
-                            downloadUpdateLoading.isVisible = showDownloadLoading
-
-                            imageView.apply {
-                                setOnClickListener {
-                                    downloadViewModel.readEpub(item)
-                                }
-                                setOnLongClickListener {
-                                    downloadViewModel.showMetadata(item)
-                                    return@setOnLongClickListener true
-                                }
-                            }
+                            downloadUpdateLoading.isVisible =
+                                showDownloadLoading && !item.isImported
 
                             val epubSize = getKey(DOWNLOAD_EPUB_SIZE, item.id.toString()) ?: 0
                             val diff = item.downloadedCount - epubSize
                             imageTextMore.text = "+$diff "
-                            imageTextMore.isVisible = diff > 0 && !showDownloadLoading
+                            imageTextMore.isVisible = diff > 0 && !showDownloadLoading && !item.isImported
                             imageText.text = item.name
                             imageView.setImage(item.image, fadeIn = false, skipCache = false)
                             val chapterCount = item.downloadedCount
@@ -171,6 +220,7 @@ class AnyAdapter(
                             {
                                 chapterCountOverlay.isVisible = false
                             }
+                            imageView.setImage(item.image)
                         }
                     }
 
@@ -192,8 +242,6 @@ class AnyAdapter(
                             }
                             imageView.setImage(
                                 item.image,
-                                fadeIn = true,
-                                skipCache = false
                             ) // skipCache = false
                             imageText.text = item.name
 
@@ -230,6 +278,7 @@ class AnyAdapter(
             is DownloadResultCompactBinding -> {
                 val card = item as DownloadFragment.DownloadDataLoaded
                 view.apply {
+                    downloadHolder.isGone = card.isImported
                     val same = imageText.text == card.name
                     backgroundCard.apply {
                         setOnClickListener {
@@ -242,7 +291,8 @@ class AnyAdapter(
                     }
                     imageView.apply {
                         setOnClickListener {
-                            downloadViewModel.load(card)
+                            if (!item.isImported)
+                                downloadViewModel.load(card)
                         }
                         setOnLongClickListener {
                             downloadViewModel.showMetadata(card)
@@ -258,10 +308,7 @@ class AnyAdapter(
                     val diff = card.downloadedCount - epubSize
                     imageTextMore.text = if (diff > 0) "+$diff " else ""
 
-                    imageView.setImage(card.image, fadeIn = false, skipCache = false)
-
-                    downloadProgressbar.isVisible = !card.generating
-                    downloadProgressbarIndeterment.isVisible = card.generating
+                    imageView.setImage(card.image)
 
                     downloadProgressText.text =
                         "${card.downloadedCount}/${card.downloadedTotal}" + if (card.ETA == "") "" else " - ${card.ETA}"
@@ -286,7 +333,8 @@ class AnyAdapter(
                             progress = card.downloadedCount.toInt() * 100
                         }
                         //download_progressbar.progress = card.downloadedCount
-                        alpha = if (card.downloadedCount >= card.downloadedTotal) 0f else 1f
+                        isIndeterminate = card.generating
+                        isVisible = card.generating || (card.downloadedCount < card.downloadedTotal)
                     }
 
                     imageText.text = card.name
@@ -336,13 +384,12 @@ class AnyAdapter(
         }
     }
 
-    override fun getItemViewTypeCustom(item: Any): Int {
+    override fun customContentViewType(item: Any): Int {
         if (item is ResultCached) {
             return RESULT_CACHED
         } else if (item is DownloadFragment.DownloadDataLoaded) {
             return DOWNLOAD_DATA_LOADED
         }
-
         throw NotImplementedError()
     }
 }
