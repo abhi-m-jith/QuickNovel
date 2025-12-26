@@ -15,7 +15,6 @@ import com.lagradost.quicknovel.providers.BestLightNovelProvider
 import com.lagradost.quicknovel.providers.FreewebnovelProvider
 import com.lagradost.quicknovel.providers.GraycityProvider
 import com.lagradost.quicknovel.providers.HiraethTranslationProvider
-import com.lagradost.quicknovel.providers.IndoWebNovelProvider
 import com.lagradost.quicknovel.providers.KolNovelProvider
 import com.lagradost.quicknovel.providers.LibReadProvider
 import com.lagradost.quicknovel.providers.MeioNovelProvider
@@ -29,7 +28,6 @@ import com.lagradost.quicknovel.providers.ReadNovelFullProvider
 import com.lagradost.quicknovel.providers.ReadfromnetProvider
 import com.lagradost.quicknovel.providers.RedditProvider
 import com.lagradost.quicknovel.providers.RoyalRoadProvider
-import com.lagradost.quicknovel.providers.SakuraNovelProvider
 import com.lagradost.quicknovel.providers.ScribblehubProvider
 import com.lagradost.quicknovel.providers.WtrLabProvider
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
@@ -73,8 +71,6 @@ class Apis {
 //            ReadAnyBookProvider(), // Books locked behind login
             MeioNovelProvider(),
             MoreNovelProvider(), // cloudflare?
-            IndoWebNovelProvider(),
-            SakuraNovelProvider(), // cloudflare?
             // WattpadProvider(), // they have randomized the css classes
             WtrLabProvider(),
             PawReadProver()
