@@ -2,13 +2,18 @@ package com.lagradost.quicknovel.utils
 
 import android.content.Context
 import android.util.Log
+import android.view.View
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.util.Locale
-import java.util.TimeZone
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -48,105 +53,134 @@ object SessionCookieProvider {
     }
 }
 
+object WebViewHelper {
+    fun configureWebView(webView: WebView) {
+        val settings = webView.settings
 
-object GrayCitySessionProvider {
-    private const val BASE_URL = "https://graycity.net/"
-    private const val PREFS_NAME = "graycity_prefs"
-    private const val COOKIE_KEY = "session_cookie"
-    private const val COOKIE_EXPIRY_KEY = "session_cookie_expiry"
-    private const val TAG = "GrayCitySession"
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.databaseEnabled = true
 
-    /** Get saved cookie if available, otherwise fetch via WebView */
-    suspend fun getSessionCookie(context: Context): String = withContext(Dispatchers.Main) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val savedCookie = prefs.getString(COOKIE_KEY, null)
+        settings.useWideViewPort = true
+        settings.loadWithOverviewMode = true
 
-        val expiry = prefs.getLong(COOKIE_EXPIRY_KEY, 0)
+        settings.userAgentString =
+            WebSettings.getDefaultUserAgent(webView.context)
 
-        // Check expiry first
-        if (!savedCookie.isNullOrBlank() && savedCookie.contains("PHPSESSID")) {
-            if (System.currentTimeMillis() < expiry) {
-                Log.d(TAG, "Using valid saved session cookie: $savedCookie")
-                return@withContext savedCookie
-            } else {
-                Log.d(TAG, "Saved cookie expired ${expiry}  ${savedCookie}, fetching new one…")
-            }
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
         }
+    }
+}
 
-        Log.d(TAG, "No saved cookie found, fetching via WebView…")
 
-        suspendCoroutine { cont ->
-            var isResumed = false
+class CloudflareWebViewLoader(
+    context: Context
+) {
 
-            val webView = WebView(context)
-            val cookieManager = CookieManager.getInstance()
-            cookieManager.setAcceptCookie(true)
-            cookieManager.setAcceptThirdPartyCookies(webView, true)
+    companion object {
+        private const val TAG = "CFWebViewLoader"
+        private const val DEFAULT_TIMEOUT_MS = 15_000L
+    }
 
-            webView.settings.javaScriptEnabled = true
-            webView.settings.domStorageEnabled = true
+    private val webView: WebView = WebView(context).apply {
+        WebViewHelper.configureWebView(this)
+        visibility = View.GONE
+    }
+
+    /**
+     * Loads a Cloudflare-protected page and extracts HTML from the DOM.
+     *
+     * @param url The page URL
+     * @param selector CSS selector to extract (e.g. "div#chapter")
+     * @param timeoutMs Optional timeout
+     */
+    suspend fun load(
+        url: String,
+        selector: String,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS
+    ): String? = withTimeoutOrNull(timeoutMs) {
+
+        suspendCancellableCoroutine { cont ->
+
+            Log.d(TAG, "Loading URL: $url")
+            Log.d(TAG, "Using selector: $selector")
 
             webView.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    if (isResumed) return
 
-                    val cookies = cookieManager.getCookie(BASE_URL)
-                    Log.d(TAG, "Cookies: $cookies")
+                override fun onPageFinished(view: WebView, finishedUrl: String) {
+                    Log.d(TAG, "onPageFinished: $finishedUrl")
 
-                    if (cookies?.contains("PHPSESSID") == true) {
-                        isResumed = true
-                        Log.d(TAG, "Fetched new session cookie: $cookies")
+                    val js = """
+                        (function() {
+                            const el = document.querySelector("$selector");
+                            if (!el) return null;
 
-                        // Use unified saving
-                        saveSessionCookie(context, cookies)
+                            el.querySelectorAll(
+                                "script, iframe, ins, noscript"
+                            ).forEach(e => e.remove());
 
-                        cont.resume(cookies)
-                        webView.destroy()
-                    } else {
-                        // Retry after 500ms if PHPSESSID not yet set
-                        view?.postDelayed({ onPageFinished(view, url) }, 500)
+                            return el.innerHTML;
+                        })();
+                    """.trimIndent()
+
+                    view.evaluateJavascript(js) { result ->
+
+                        Log.d(TAG, "evaluateJavascript returned")
+
+                        if (!cont.isActive) {
+                            Log.w(TAG, "Coroutine cancelled before JS result")
+                            return@evaluateJavascript
+                        }
+
+                        if (result == null || result == "null") {
+                            Log.e(TAG, "DOM element not found: $selector")
+                            cont.resume(null)
+                            return@evaluateJavascript
+                        }
+
+                        val decoded = decodeJsString(result)
+
+                        Log.d(
+                            TAG,
+                            "Extracted HTML length=${decoded.length}"
+                        )
+
+                        cont.resume(decoded)
+                    }
+                }
+
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: WebResourceError
+                ) {
+                    Log.e(TAG, "WebView error: ${error}")
+
+                    if (cont.isActive) {
+                        cont.resume(null)
                     }
                 }
             }
 
-            webView.loadUrl(BASE_URL)
+            webView.loadUrl(url)
+
+            cont.invokeOnCancellation {
+                Log.w(TAG, "Coroutine cancelled, stopping WebView")
+                webView.stopLoading()
+            }
         }
     }
 
-    /** Manually update cookie if obtained elsewhere */
-    fun saveSessionCookie(context: Context, cookie: String) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val expiry = parseExpiry(cookie) ?: (System.currentTimeMillis() + 24 * 60 * 60 * 1000) // default 24h
-
-        prefs.edit()
-            .putString(COOKIE_KEY, cookie)
-            .putLong(COOKIE_EXPIRY_KEY, expiry)
-            .apply()
-
-        Log.d(TAG, "Manually saved cookie (exp $expiry): $cookie")
+    /**
+     * Decodes JSON-escaped JS strings returned by evaluateJavascript()
+     */
+    private fun decodeJsString(raw: String): String {
+        return JSONObject("""{"v":$raw}""").getString("v")
     }
-    private fun parseExpiry(cookie: String): Long? {
-        val regex = Regex("(?i)expires=([^;]+)")
-        val match = regex.find(cookie) ?: return null
-
-        return try {
-            val format = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
-            format.timeZone = TimeZone.getTimeZone("GMT")
-            format.parse(match.groupValues[1])?.time
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /** Clear cookie from storage */
-    fun clearSessionCookie(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().remove(COOKIE_KEY).apply()
-        Log.d(TAG, "Session cookie cleared")
-    }
-
-
-
-
-
 }
+
+
+
+

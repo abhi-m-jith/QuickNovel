@@ -3,9 +3,11 @@ package com.lagradost.quicknovel.providers
 import android.util.Log
 import com.lagradost.quicknovel.*
 import com.lagradost.quicknovel.MainActivity.Companion.app
+import com.lagradost.quicknovel.utils.CloudflareWebViewLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
@@ -334,6 +336,11 @@ class MVLEmpyrProvider : MainAPI() {
         ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
     }
 
+    private val webViewLoader by lazy {
+        CloudflareWebViewLoader(MainActivity.context)
+    }
+
+
     override suspend fun loadMainPage(
         page: Int,
         mainCategory: String?,
@@ -437,12 +444,12 @@ class MVLEmpyrProvider : MainAPI() {
         val novelData = fullNovelList.find { it["slug"] == slug } ?: throw ErrorLoadingException("Novel not found")
 
         val name = novelData["name"] as? String ?: throw ErrorLoadingException("Name not found")
-        Log.d("MVLEmpyrProvider", "Load Result: name=$name, slug=$slug")
+        //Log.d("MVLEmpyrProvider", "Load Result: name=$name, slug=$slug")
         val author = novelData["author-name"] as? String
         val novelCode = (novelData["novel-code"] as? Number)?.toInt() ?: 0
         val poster = "https://assets.mvlempyr.app/images/300/${novelCode}.webp"
         val synopsisHtml = novelData["synopsis"] as? String
-        val synopsisText = Jsoup.parse(synopsisHtml).text()
+        val synopsisText = Jsoup.parse(synopsisHtml.toString()).text()
         val status = novelData["status"] as? String
         val totalChapters = (novelData["total-chapters"] as? Number)?.toInt() ?: 0
         val tag = calculateTag(novelCode)
@@ -530,6 +537,13 @@ class MVLEmpyrProvider : MainAPI() {
         }
     }
 
+    fun decodeHtmlManually(input: String): String {
+        return input
+            .replace("\\u003C", "<")
+            .replace("\\u003E", ">")
+            .replace("\\\"", "\"")
+            .replace("\\n", "\n")
+    }
 
 
     override suspend fun loadHtml(url: String): String? {
@@ -544,9 +558,12 @@ class MVLEmpyrProvider : MainAPI() {
         //Log.d("MVLEmpyrProvider", "Loading Chapter HTML from URL: $fullUrl")
 
         try {
-            val document = app.get(fullUrl).document
-            val ContentElement = document.selectFirst("div#chapter.ct-text-block")
-            val content = ContentElement?.html()
+            val contentraw = withContext(Dispatchers.Main) {
+                webViewLoader.load(url = fullUrl, selector = "div#chapter")
+            }
+            val document = Jsoup.parse(decodeHtmlManually(contentraw.toString()))
+            //val ContentElement = document.selectFirst("div#chapter.ct-text-block")
+            val content = document.html()
 
             if (content != null) {
                 // Log.d("MVLEmpyrProvider", "Chapter Content Loaded Successfully from Primary URL")
