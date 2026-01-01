@@ -33,15 +33,40 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Generate CI signing keystore
+        run: |
+          STORE_PASS=$(openssl rand -hex 16)
+          KEY_ALIAS=ci-release
+          KEYSTORE_PATH="$PWD/app/ci-release.keystore"
+          echo "CI_KEYSTORE_PASSWORD=$STORE_PASS" >> $GITHUB_ENV
+          echo "CI_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+          echo "CI_KEYSTORE_FILE=$KEYSTORE_PATH" >> $GITHUB_ENV
+          keytool -genkeypair \
+            -alias "$KEY_ALIAS" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 365 \
+            -keystore "$KEYSTORE_PATH" \
+            -storepass "$STORE_PASS" \
+            -keypass "$STORE_PASS" \
+            -dname "CN=QuickNovel CI, OU=CI, O=QuickNovel, L=NA, S=NA, C=US"
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
       - name: Build release APK
+        env:
+          ORG_GRADLE_PROJECT_ciKeystoreFile: ${{ env.CI_KEYSTORE_FILE }}
+          ORG_GRADLE_PROJECT_ciKeystorePassword: ${{ env.CI_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_ciKeyAlias: ${{ env.CI_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_ciKeyPassword: ${{ env.CI_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease
 
       - name: Rename APK
         run: |
-          APK_PATH=$(find app/build/outputs/apk/release -type f -name "*-release*.apk" -print -quit)
+          SIGNED_APK=$(find app/build/outputs/apk/release -type f -name "*-release*.apk" ! -name "*-unsigned.apk" -print | LC_ALL=C sort | head -n 1)
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -type f -name "*-release-unsigned.apk" -print | LC_ALL=C sort | head -n 1)
+          APK_PATH=${SIGNED_APK:-$UNSIGNED_APK}
           if [ -z "$APK_PATH" ]; then
             echo "No release APK found to rename." >&2
             exit 1

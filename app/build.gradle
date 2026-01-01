@@ -3,6 +3,12 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlin-kapt'
 
 android {
+    def ciKeystorePath = project.findProperty("ciKeystoreFile")
+    def ciKeystorePassword = project.findProperty("ciKeystorePassword")
+    def ciKeyAlias = project.findProperty("ciKeyAlias")
+    def ciKeyPassword = project.findProperty("ciKeyPassword")
+    def hasCiSigning = ciKeystorePath && ciKeystorePassword && ciKeyAlias && ciKeyPassword
+
     compileSdkVersion 35
     //buildToolsVersion "30.0.3"
 
@@ -26,8 +32,22 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            if (hasCiSigning) {
+                storeFile file(ciKeystorePath)
+                storePassword ciKeystorePassword
+                keyAlias ciKeyAlias
+                keyPassword ciKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasCiSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
