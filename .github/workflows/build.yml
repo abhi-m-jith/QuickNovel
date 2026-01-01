@@ -2,6 +2,15 @@ name: Manual Build and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (optional)'
+        required: false
+        default: ''
+      release_name:
+        description: 'Release title (optional)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -31,7 +40,13 @@ jobs:
         run: ./gradlew assembleRelease
 
       - name: Rename APK
-        run: mv app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/QuickNovel.apk
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -type f -name "*-release*.apk" -print -quit)
+          if [ -z "$APK_PATH" ]; then
+            echo "No release APK found to rename." >&2
+            exit 1
+          fi
+          mv "$APK_PATH" app/build/outputs/apk/release/QuickNovel.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -41,13 +56,20 @@ jobs:
 
       - name: Prepare release metadata
         run: |
-          TAG_NAME="manual-${GITHUB_RUN_ID}"
-          RELEASE_NAME="Manual Build ${TAG_NAME}"
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          INPUT_NAME="${{ github.event.inputs.release_name }}"
+          DEFAULT_TAG="manual-${{ github.run_number }}-${{ github.run_id }}"
+          TAG_NAME="${INPUT_TAG:-$DEFAULT_TAG}"
+          if [ -n "$INPUT_NAME" ]; then
+            RELEASE_NAME="$INPUT_NAME"
+          else
+            RELEASE_NAME="Manual Build ${TAG_NAME}"
+          fi
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
           echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.0.8
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
