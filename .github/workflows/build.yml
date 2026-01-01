@@ -88,13 +88,13 @@ jobs:
           if [ -n "$INPUT_NAME" ]; then
             RELEASE_NAME="$INPUT_NAME"
           else
-            RELEASE_NAME="Manual Build ${TAG_NAME}"
+            RELEASE_NAME="Build ${TAG_NAME}"
           fi
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
           echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_ENV
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2.0.8
+        uses: softprops/action-gh-release@v2.5.0
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
