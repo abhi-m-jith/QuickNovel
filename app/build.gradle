@@ -120,7 +120,7 @@ dependencies {
     implementation 'com.github.LagradOst:SafeFile:a926e7615a' // To Prevent the URI File Fu*kery
     implementation 'com.jaredrummler:colorpicker:1.1.0'
 
-    implementation 'com.github.Blatzar:NiceHttp:0.4.13'
+    implementation 'com.github.Blatzar:NiceHttp:0.4.14'
     implementation "io.coil-kt.coil3:coil:3.3.0"
     implementation "io.coil-kt.coil3:coil-network-okhttp:3.3.0"
 
