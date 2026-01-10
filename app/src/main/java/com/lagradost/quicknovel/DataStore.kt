@@ -9,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.KotlinFeature
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.lagradost.quicknovel.mvvm.logError
 import androidx.core.content.edit
+import com.lagradost.quicknovel.mvvm.Replacer_Data
 
 const val PREFERENCES_NAME: String = "rebuild_preference"
 const val DOWNLOAD_FOLDER: String = "downloads_data"
@@ -59,6 +60,9 @@ const val RESULT_BOOKMARK: String = "result_bookmarked"
 const val RESULT_BOOKMARK_STATE: String = "result_bookmarked_state"
 const val HISTORY_FOLDER: String = "result_history"
 const val CURRENT_TAB : String = "current_tab"
+const val BOOK_REPLACER_FOLDER = "book_replacer"
+const val BOOK_REPLACER_KEY = "replacer_words"
+
 
 /** When inserting many keys use this function, this is because apply for every key is very expensive on memory */
 data class Editor(
@@ -219,4 +223,49 @@ object DataStore {
     inline fun <reified T : Any> Context.getKey(folder: String, path: String, defVal: T?): T? {
         return getKey(getFolderName(folder, path), defVal) ?: defVal
     }
+
+    fun Context.saveBookReplacers(
+        bookKey: String,
+        replacers: List<Replacer_Data>
+    ) {
+        setKey(
+            BOOK_REPLACER_FOLDER,
+            "$bookKey/$BOOK_REPLACER_KEY",
+            replacers
+        )
+    }
+
+    fun Context.loadBookReplacers(
+        bookKey: String
+    ): List<Replacer_Data> {
+
+        val raw = getKey<List<*>>(
+            BOOK_REPLACER_FOLDER,
+            "$bookKey/$BOOK_REPLACER_KEY",
+            emptyList<Any>()
+        ) ?: return emptyList()
+
+//        return getKey(
+//            BOOK_REPLACER_FOLDER,
+//            "$bookKey/$BOOK_REPLACER_KEY",
+//            emptyList()
+//        ) ?: emptyList()
+        return raw.mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+
+            Replacer_Data(
+                word = map["word"] as? String ?: "",
+                replacement_Word = map["replacement_Word"] as? String ?: ""
+            )
+        }
+    }
+
+    fun Context.clearBookReplacers(bookKey: String) {
+        removeKey(
+            BOOK_REPLACER_FOLDER,
+            "$bookKey/$BOOK_REPLACER_KEY"
+        )
+    }
+
+
 }

@@ -249,4 +249,7 @@
     <string name="import_epub">Import epub</string>
     <string name="show_authors_notes">Show authors notes</string>
 
+
+    <string name="add" translatable="false">Add</string>
+
 </resources>

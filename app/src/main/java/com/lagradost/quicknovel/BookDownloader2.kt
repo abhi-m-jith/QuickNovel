@@ -52,6 +52,7 @@ import com.lagradost.quicknovel.DataStore.mapper
 import com.lagradost.quicknovel.ImageDownloader.getImageBitmapFromUrl
 import com.lagradost.quicknovel.NotificationHelper.etaToString
 import com.lagradost.quicknovel.extractors.ExtractorApi
+import com.lagradost.quicknovel.mvvm.BookHelper.ReplaceText
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.ui.download.DownloadFragment
@@ -604,7 +605,7 @@ object BookDownloader2Helper {
                 api.api.rateLimitMutex.lock()
             }
             try {
-                val page = api.loadHtml(data.url)
+                val page = api.loadHtml(data.url)?.let { ReplaceText(it) }//api.loadHtml(data.url)
 
                 if (!page.isNullOrBlank()) {
                     rFile.createNewFile() // only create the file when actually needed
