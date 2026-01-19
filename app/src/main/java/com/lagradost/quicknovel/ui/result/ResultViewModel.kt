@@ -41,6 +41,7 @@ import com.lagradost.quicknovel.RESULT_CHAPTER_FILTER_UNREAD
 import com.lagradost.quicknovel.RESULT_CHAPTER_SORT
 import com.lagradost.quicknovel.StreamResponse
 import com.lagradost.quicknovel.UserReview
+import com.lagradost.quicknovel.mvvm.BookHelper
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.launchSafe
 import com.lagradost.quicknovel.ui.ReadType
@@ -526,6 +527,11 @@ class ResultViewModel : ViewModel() {
     fun delete() = viewModelScope.launch {
         loadMutex.withLock {
             if (!hasLoaded) return@launch
+
+            context?.let {
+                BookHelper.clearBook(it, loadId.toString())
+            }
+
             BookDownloader2.deleteNovel(load.author, load.name, apiName)
         }
     }
@@ -594,6 +600,7 @@ class ResultViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
+        BookHelper.clearAll()
         BookDownloader2.downloadProgressChanged -= ::progressChanged
         //BookDownloader2.downloadDataChanged -= ::progressDataChanged
         BookDownloader2.downloadRemoved -= ::downloadRemoved
@@ -714,6 +721,11 @@ class ResultViewModel : ViewModel() {
         setKey(
             DOWNLOAD_EPUB_LAST_ACCESS, tid.toString(), System.currentTimeMillis()
         )
+
+        context?.let {
+            BookHelper.load(it, tid.toString())
+        }
+
         reCacheChapters()
         updateBookmarkData()
 

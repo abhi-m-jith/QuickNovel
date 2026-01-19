@@ -50,6 +50,7 @@ import com.lagradost.quicknovel.databinding.ColorRoundCheckmarkBinding
 import com.lagradost.quicknovel.databinding.ReadBottomSettingsBinding
 import com.lagradost.quicknovel.databinding.ReadMainBinding
 import com.lagradost.quicknovel.databinding.SingleOverscrollChapterBinding
+import com.lagradost.quicknovel.mvvm.BookHelper
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.observe
 import com.lagradost.quicknovel.mvvm.observeNullable
@@ -65,6 +66,7 @@ import com.lagradost.quicknovel.ui.TextAdapter
 import com.lagradost.quicknovel.ui.TextConfig
 import com.lagradost.quicknovel.ui.TextVisualLine
 import com.lagradost.quicknovel.ui.ViewHolderState
+import com.lagradost.quicknovel.ui.result.ReplaceWordsBottomSheet
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.SingleSelectionHelper.showDialog
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
@@ -439,6 +441,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     var lockBottom: Int? = null
     var currentScroll: Int = 0
 
+    private var readSettingsBottomSheet: BottomSheetDialog? = null
+
     private fun updateTTSLine(line: TTSHelper.TTSLine?, depth: Int = 0) {
         // update the visual component
         /*println("LINE: ${line?.speakOutMsg} =>")
@@ -688,6 +692,17 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     }
 
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
+
+
+    private fun openReplaceWordsDialog() {
+
+        ReplaceWordsBottomSheet.newInstance(bookId)
+            .show(supportFragmentManager, "ReplaceWordsBottomSheet")
+    }
+
+
+    private val bookId=BookHelper.current_book_ID
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         CommonActivity.loadThemes(this)
@@ -1115,6 +1130,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
         binding.readActionSettings.setOnClickListener {
             val bottomSheetDialog = BottomSheetDialog(this)
+            readSettingsBottomSheet=bottomSheetDialog
 
             val binding = ReadBottomSettingsBinding.inflate(layoutInflater, null, false)
             bottomSheetDialog.setContentView(binding.root)
@@ -1444,6 +1460,12 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 hardResetStream.setOnClickListener {
                     showToast(getString(R.string.reload_chapter_format).format(""))
                     viewModel.reloadChapter()
+                }
+                replaceScreen.setOnClickListener {
+                    readSettingsBottomSheet?.dismiss()
+                    readSettingsBottomSheet = null
+
+                    openReplaceWordsDialog()
                 }
 
                 readSettingsScrollVol.isChecked = viewModel.scrollWithVolume
