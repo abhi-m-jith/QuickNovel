@@ -1,6 +1,7 @@
 package com.lagradost.quicknovel.utils
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
 import android.view.View
 import android.webkit.CookieManager
@@ -92,6 +93,14 @@ class CloudflareWebViewLoader(
 //        visibility = View.GONE
 //    }
 
+    fun resetWebView(webView: WebView) {
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        webView.clearHistory()
+        webView.clearCache(true)
+    }
+
+
     /**
      * Loads a Cloudflare-protected page and extracts HTML from the DOM.
      *
@@ -106,7 +115,7 @@ class CloudflareWebViewLoader(
     ): String? = withTimeoutOrNull(timeoutMs) {
 
         val webView = pool.acquire()
-
+        resetWebView(webView)
         try {
             withContext(Dispatchers.Main)
             {
@@ -175,7 +184,17 @@ class CloudflareWebViewLoader(
                                 request: WebResourceRequest,
                                 error: WebResourceError
                             ) {
+                                if (!request.isForMainFrame) return
                                 Log.e(TAG, "WebView error: ${error}")
+
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    Log.e(TAG, """
+                                        WebView error:url=${request.url}
+                                        code=${error.errorCode}
+                                        description=${error.description}
+                                        isMainFrame=${request.isForMainFrame}
+                                        """.trimIndent())
+                                }
 
                                 if (cont.isActive) {
                                     cont.resume(null)

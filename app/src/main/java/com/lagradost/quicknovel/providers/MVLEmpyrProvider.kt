@@ -559,7 +559,7 @@ class MVLEmpyrProvider : MainAPI() {
         //Log.d("MVLEmpyrProvider", "Loading Chapter HTML from URL: $fullUrl")
 
         try {
-            val contentraw = withContext(Dispatchers.IO) {
+            val contentraw = withContext(Dispatchers.Main) {
                 webViewLoader.load(url = fullUrl, selector = "div#chapter")
             }
             val document = Jsoup.parse(decodeHtmlManually(contentraw.toString()))

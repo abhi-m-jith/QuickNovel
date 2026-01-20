@@ -85,6 +85,7 @@ object BookHelper {
 
     fun ReplaceText(inputText: String): String {
         android.util.Log.d("BOOK HELPER","REPLACE CALLED")
+        android.util.Log.d("BOOK HELPER","Text: ${inputText.length}")
         val rules = All_Words
         if (rules.isEmpty()) return inputText
         android.util.Log.d("BOOK HELPER","RULES OK")

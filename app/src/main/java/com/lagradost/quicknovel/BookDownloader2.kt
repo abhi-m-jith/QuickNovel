@@ -585,6 +585,10 @@ object BookDownloader2Helper {
         }
         return null
     }
+    private fun isNullPage(html: String): Boolean {
+        return Regex("<body>\\s*null\\s*</body>", RegexOption.IGNORE_CASE)
+            .containsMatchIn(html)
+    }
 
     suspend fun downloadIndividualChapter(
         filepath: String,
@@ -595,7 +599,10 @@ object BookDownloader2Helper {
     ): Boolean = withContext(Dispatchers.IO) {
         val rFile = File(filepath)
         if (rFile.exists() && rFile.length() > 0 && !forceReload) {
-            return@withContext true
+            val content = rFile.readText()
+            if (!isNullPage(content)) {
+                return@withContext true
+            }
         }
         rFile.parentFile?.mkdirs()
         if (rFile.isDirectory) rFile.delete()
@@ -607,7 +614,7 @@ object BookDownloader2Helper {
             try {
                 val page = api.loadHtml(data.url)?.let { ReplaceText(it) }//api.loadHtml(data.url)
 
-                if (!page.isNullOrBlank()) {
+                if (!page.isNullOrBlank() && !isNullPage(page)) {
                     rFile.createNewFile() // only create the file when actually needed
                     rFile.writeText("${data.name}\n${page}")
                     if (api.rateLimitTime > 0) {
@@ -626,6 +633,8 @@ object BookDownloader2Helper {
                 }
             }
         }
+        // Still failed after retries then save null page
+        rFile.writeText("<html><body>null</body></html>")
         return@withContext false
     }
 
