@@ -99,6 +99,7 @@ class MainPageViewModel : ViewModel() {
             oldResponse = currentCards.value
         }
 
+
         // searchCards.postValue(ArrayList())
         currentCards.postValue(Resource.Loading())
         currentPage.postValue(0)
@@ -107,8 +108,9 @@ class MainPageViewModel : ViewModel() {
             val res = repo.search(query)
             currentCards.postValue(res.map { x -> SearchResponseList(items = x, pages = 1, id = ++searchResponseListQueries) })
         }
+        android.util.Log.d("SEARCH AREA","${query} ${searchPage} ${infSearchCards.count()}")
     }
-    fun search(query: String, page: Int = 1) {
+    fun search(query: String, page: Int) {
 
         if(api.api.isLastPage)
         {
@@ -116,7 +118,7 @@ class MainPageViewModel : ViewModel() {
         }
         searchPage=page
         api.api.isSearching=true
-        if (page == 1) {
+        if (currentSearchQuery != query || page == 1) {
             infSearchCards.clear()
             currentSearchQuery = query
             hasQueryInput=true
@@ -139,17 +141,21 @@ class MainPageViewModel : ViewModel() {
             when (val res = repo.search(query, searchPage)) {
                 is Resource.Success -> {
                     val response = res.value
-                    infSearchCards.addAll(response)
-
-                    currentCards.postValue(
-                        Resource.Success(
-                            SearchResponseList(
-                                infSearchCards,
-                                searchPage,
-                                ++searchResponseListQueries
+                    if(!infSearchCards.containsAll(response))
+                    {
+                        infSearchCards.addAll(response)
+                        currentCards.postValue(
+                            Resource.Success(
+                                SearchResponseList(
+                                    infSearchCards,
+                                    searchPage,
+                                    ++searchResponseListQueries
+                                )
                             )
                         )
-                    )
+                    }
+
+                    
                 }
 
                 is Resource.Failure -> {

@@ -81,6 +81,7 @@ class ReplaceWordsAdapter(
         {
             items.add(item)
             notifyItemInserted(items.size - 1)
+            android.util.Log.d("BOOK HELPER","Item Added: $item")
         }
     }
     fun updateItem(index: Int, item: Replacer_Data) {
@@ -90,9 +91,11 @@ class ReplaceWordsAdapter(
 
 
     fun deleteItem(index: Int) {
+        android.util.Log.d("BOOK HELPER","Item Deleting at: $index  Size:${items.size}")
         items.removeAt(index)
         selectedIndex = null
         notifyDataSetChanged()
+        android.util.Log.d("BOOK HELPER","Item Deleted at: $index  Size:${items.size}")
     }
 
     fun clearSelection() {

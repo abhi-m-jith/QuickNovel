@@ -11,6 +11,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -76,7 +78,8 @@ object WebViewHelper {
 
 
 class CloudflareWebViewLoader(
-    context: Context
+    context: Context,
+    private val pool: WebViewPool
 ) {
 
     companion object {
@@ -84,10 +87,10 @@ class CloudflareWebViewLoader(
         private const val DEFAULT_TIMEOUT_MS = 15_000L
     }
 
-    private val webView: WebView = WebView(context).apply {
-        WebViewHelper.configureWebView(this)
-        visibility = View.GONE
-    }
+//    private val webView: WebView = WebView(context).apply {
+//        WebViewHelper.configureWebView(this)
+//        visibility = View.GONE
+//    }
 
     /**
      * Loads a Cloudflare-protected page and extracts HTML from the DOM.
@@ -102,17 +105,24 @@ class CloudflareWebViewLoader(
         timeoutMs: Long = DEFAULT_TIMEOUT_MS
     ): String? = withTimeoutOrNull(timeoutMs) {
 
-        suspendCancellableCoroutine { cont ->
+        val webView = pool.acquire()
 
-            Log.d(TAG, "Loading URL: $url")
-            Log.d(TAG, "Using selector: $selector")
+        try {
+            withContext(Dispatchers.Main)
+            {
+                suspendCancellableCoroutine { cont ->
 
-            webView.webViewClient = object : WebViewClient() {
+                    fun loadPage(allowRetry: Boolean)
+                    {
+                        Log.d(TAG, "Loading URL: $url")
+                        Log.d(TAG, "Using selector: $selector")
 
-                override fun onPageFinished(view: WebView, finishedUrl: String) {
-                    Log.d(TAG, "onPageFinished: $finishedUrl")
+                        webView.webViewClient = object : WebViewClient() {
 
-                    val js = """
+                            override fun onPageFinished(view: WebView, finishedUrl: String) {
+                                Log.d(TAG, "onPageFinished: $finishedUrl")
+
+                                val js = """
                         (function() {
                             const el = document.querySelector("$selector");
                             if (!el) return null;
@@ -125,51 +135,66 @@ class CloudflareWebViewLoader(
                         })();
                     """.trimIndent()
 
-                    view.evaluateJavascript(js) { result ->
+                                view.evaluateJavascript(js) { result ->
 
-                        Log.d(TAG, "evaluateJavascript returned")
+                                    Log.d(TAG, "evaluateJavascript returned")
 
-                        if (!cont.isActive) {
-                            Log.w(TAG, "Coroutine cancelled before JS result")
-                            return@evaluateJavascript
+                                    if (!cont.isActive) {
+                                        Log.w(TAG, "Coroutine cancelled before JS result")
+                                        return@evaluateJavascript
+                                    }
+
+                                    if ((result == null || result == "null") && allowRetry) {
+                                        Log.w(TAG, "Retrying load for $url")
+                                        view.post {
+                                            view.reload()
+                                            loadPage(false)
+                                        }
+                                        return@evaluateJavascript
+                                    }
+
+                                    if (result == null || result == "null") {
+                                        Log.e(TAG, "DOM element not found: $selector")
+                                        cont.resume(null)
+                                        return@evaluateJavascript
+                                    }
+
+                                    val decoded = decodeJsString(result)
+
+                                    Log.d(
+                                        TAG,
+                                        "Extracted HTML length=${decoded.length}"
+                                    )
+
+                                    cont.resume(decoded)
+                                }
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView,
+                                request: WebResourceRequest,
+                                error: WebResourceError
+                            ) {
+                                Log.e(TAG, "WebView error: ${error}")
+
+                                if (cont.isActive) {
+                                    cont.resume(null)
+                                }
+                            }
                         }
 
-                        if (result == null || result == "null") {
-                            Log.e(TAG, "DOM element not found: $selector")
-                            cont.resume(null)
-                            return@evaluateJavascript
-                        }
-
-                        val decoded = decodeJsString(result)
-
-                        Log.d(
-                            TAG,
-                            "Extracted HTML length=${decoded.length}"
-                        )
-
-                        cont.resume(decoded)
+                        webView.loadUrl(url)
                     }
-                }
-
-                override fun onReceivedError(
-                    view: WebView,
-                    request: WebResourceRequest,
-                    error: WebResourceError
-                ) {
-                    Log.e(TAG, "WebView error: ${error}")
-
-                    if (cont.isActive) {
-                        cont.resume(null)
+                    loadPage(allowRetry = true)
+                    cont.invokeOnCancellation {
+                        Log.w(TAG, "Coroutine cancelled, stopping WebView")
+                        webView.stopLoading()
                     }
                 }
             }
 
-            webView.loadUrl(url)
-
-            cont.invokeOnCancellation {
-                Log.w(TAG, "Coroutine cancelled, stopping WebView")
-                webView.stopLoading()
-            }
+        }finally {
+            pool.release(webView)
         }
     }
 
@@ -178,6 +203,38 @@ class CloudflareWebViewLoader(
      */
     private fun decodeJsString(raw: String): String {
         return JSONObject("""{"v":$raw}""").getString("v")
+    }
+}
+
+
+class WebViewPool(
+    private val context: Context,
+    private val maxSize: Int = 4
+) {
+    private val pool = ArrayDeque<WebView>()
+    private val mutex = Mutex()
+
+    suspend fun acquire(): WebView = mutex.withLock {
+        if (pool.isNotEmpty()) {
+            pool.removeFirst()
+        } else {
+            withContext(Dispatchers.Main) {
+                WebView(context).apply {
+                    WebViewHelper.configureWebView(this)
+                    visibility = View.GONE
+                }
+            }
+        }
+    }
+
+    suspend fun release(webView: WebView) = mutex.withLock {
+        if (pool.size < maxSize) {
+            pool.addLast(webView)
+        } else {
+            withContext(Dispatchers.Main) {
+                webView.destroy()
+            }
+        }
     }
 }
 

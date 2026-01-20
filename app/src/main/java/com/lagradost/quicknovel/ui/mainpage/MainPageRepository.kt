@@ -23,9 +23,9 @@ class MainPageRepository(val api: APIRepository) {
     }
 
     suspend fun search(query: String): Resource<List<SearchResponse>> {
-        return api.search(query,1)
+        return api.search(query)
     }
-    suspend fun search(query: String,page: Int = 1): Resource<List<SearchResponse>> {
+    suspend fun search(query: String,page: Int): Resource<List<SearchResponse>> {
         return api.search(query,page)
     }
 }

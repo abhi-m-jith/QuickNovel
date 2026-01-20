@@ -159,7 +159,7 @@ class MainPageFragment : Fragment() {
                 }
 
                 override fun onQueryTextChange(newText: String): Boolean {
-                    viewModel.ResetVales()
+                    //viewModel.ResetVales()
                     return true
                 }
             })
@@ -207,6 +207,10 @@ class MainPageFragment : Fragment() {
                 when (data) {
                     is Resource.Success -> {
                         val value = data.value
+                        android.util.Log.d(
+                            "SEARCH AREA",
+                            "Observer: ${value.items.size} items, pages=${value.pages}, id=${value.id}"
+                        )
                         binding.mainpageLoading.isVisible = false
                         binding.mainpageLoadingError.isVisible = false
                         mainPageAdapter.submitList(value.items)
@@ -224,6 +228,7 @@ class MainPageFragment : Fragment() {
                     }
 
                     is Resource.Loading -> {
+                        android.util.Log.d("SEARCH AREA", "Loading...")
                         mainPageAdapter.submitList(listOf())
                         binding.mainpageList.isInvisible = true
                         binding.mainpageLoading.isVisible = true
@@ -232,6 +237,7 @@ class MainPageFragment : Fragment() {
                     }
 
                     is Resource.Failure -> {
+                        android.util.Log.d("SEARCH AREA", "Failure: ${data.errorString}")
                         mainPageAdapter.submitList(listOf())
                         binding.mainpageList.isInvisible = false
                         binding.mainpageErrorText.text = data.errorString
@@ -336,7 +342,7 @@ class MainPageFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        if(!viewModel.api.api.isOpeningBook)
+        if(!viewModel.api.api.isOpeningBook && !viewModel.api.api.isSearching)
         {
             viewModel.api.api.ResetFiltersandPage()
         }

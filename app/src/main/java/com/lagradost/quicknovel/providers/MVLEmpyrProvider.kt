@@ -4,6 +4,7 @@ import android.util.Log
 import com.lagradost.quicknovel.*
 import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.utils.CloudflareWebViewLoader
+import com.lagradost.quicknovel.utils.WebViewPool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -337,7 +338,7 @@ class MVLEmpyrProvider : MainAPI() {
     }
 
     private val webViewLoader by lazy {
-        CloudflareWebViewLoader(MainActivity.context)
+        CloudflareWebViewLoader(MainActivity.context, WebViewPool(MainActivity.context, maxSize = 4))
     }
 
 
@@ -558,7 +559,7 @@ class MVLEmpyrProvider : MainAPI() {
         //Log.d("MVLEmpyrProvider", "Loading Chapter HTML from URL: $fullUrl")
 
         try {
-            val contentraw = withContext(Dispatchers.Main) {
+            val contentraw = withContext(Dispatchers.IO) {
                 webViewLoader.load(url = fullUrl, selector = "div#chapter")
             }
             val document = Jsoup.parse(decodeHtmlManually(contentraw.toString()))

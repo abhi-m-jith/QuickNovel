@@ -121,7 +121,7 @@ class ReplaceWordsBottomSheet : BottomSheetDialogFragment() {
         }
 
         btnSave.setOnClickListener {
-            if(BookHelper.All_Words.isNotEmpty())
+            if(BookHelper.checkforchanges())
             {
                 //BookHelper.All_Words.forEach { BookHelper.addItem(it) }
                 BookHelper.save(requireContext(), bookKey)

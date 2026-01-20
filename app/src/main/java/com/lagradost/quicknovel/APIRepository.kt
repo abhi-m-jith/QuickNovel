@@ -113,9 +113,13 @@ class APIRepository(val api: MainAPI) {
             api.search(query) ?: throw ErrorLoadingException("No data")
         }
     }
-    suspend fun search(query: String,page: Int = 1): Resource<List<SearchResponse>> {
+    suspend fun search(query: String,page: Int): Resource<List<SearchResponse>> {
         return safeApiCall {
-            api.search(query,page) ?: throw ErrorLoadingException("No data")
+            try {
+                api.search(query, page) ?: throw ErrorLoadingException("No data")
+            } catch (e: NotImplementedError) {
+                api.search(query) ?: throw ErrorLoadingException("No data")
+            }
         }
     }
 

@@ -53,6 +53,10 @@ object BookHelper {
         _allWords.clear()
         _allWords.addAll(_ogWords)
     }
+    fun checkforchanges(): Boolean {
+        if(_allWords == _ogWords) return false
+        return true
+    }
 
     fun load(context: Context, bookKey: String) {
         clearAll()

@@ -62,9 +62,9 @@ abstract class MainAPI {
     }
 
     open suspend fun search(query: String): List<SearchResponse>? {
-        return search(query,1)
+        throw NotImplementedError()
     }
-    open suspend fun search(query: String,page: Int = 1): List<SearchResponse>? {
+    open suspend fun search(query: String,page: Int): List<SearchResponse>? {
         throw NotImplementedError()
     }
 
