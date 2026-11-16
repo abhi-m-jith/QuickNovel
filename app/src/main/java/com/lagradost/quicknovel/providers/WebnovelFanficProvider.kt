@@ -36,12 +36,6 @@ import org.json.JSONObject
 import org.jsoup.select.Elements
 import kotlin.coroutines.CoroutineContext
 
-class LruCache<K, V>(private val maxSize: Int) : LinkedHashMap<K, V>(maxSize, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean {
-        return size > maxSize
-    }
-}
-
 private var cachedCookies: String? = null
 private var cachedCsrfToken: String? = null
 
