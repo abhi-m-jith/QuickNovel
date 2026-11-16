@@ -8,6 +8,7 @@ import com.lagradost.cloudstream4.state.ActionHandler
 import com.lagradost.cloudstream4.state.DebounceQuery
 import com.lagradost.cloudstream4.state.DefaultStateContainer
 import com.lagradost.cloudstream4.state.StateContainer
+import com.lagradost.quicknovel.BaseApplication.Companion.bookdeletedremovekeys
 import com.lagradost.quicknovel.BaseApplication.Companion.getKey
 import com.lagradost.quicknovel.BaseApplication.Companion.getKeys
 import com.lagradost.quicknovel.BaseApplication.Companion.removeKey
@@ -302,8 +303,7 @@ class DownloadViewModel2(
                         BookDownloader.delete(id)
                     }
                 } else {
-                    removeKey(RESULT_BOOKMARK, id.toString())
-                    removeKey(RESULT_BOOKMARK_STATE, id.toString())
+                    bookdeletedremovekeys(id.toString())
                     updateState {
                         copy(
                             pages = pages.updateRows { index ->

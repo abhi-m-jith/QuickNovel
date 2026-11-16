@@ -13,6 +13,8 @@ import com.lagradost.quicknovel.DataStore.getKeys
 import com.lagradost.quicknovel.DataStore.removeKey
 import com.lagradost.quicknovel.DataStore.removeKeys
 import com.lagradost.quicknovel.DataStore.setKey
+import com.lagradost.quicknovel.LibraryHelper.setLibraryBooks
+import com.lagradost.quicknovel.mvvm.BookHelper
 import java.lang.ref.WeakReference
 
 class BaseApplication : Application(), SingletonImageLoader.Factory, Configuration.Provider  {
@@ -92,6 +94,16 @@ class BaseApplication : Application(), SingletonImageLoader.Factory, Configurati
 
         fun removeKey(path: String) {
             context?.removeKey(path)
+        }
+
+        fun bookdeletedremovekeys(id: String){
+            removeKey(RESULT_BOOKMARK, id)
+            removeKey(RESULT_BOOKMARK_STATE, id)
+
+            context?.let {
+                BookHelper.clearBook(it,id)
+                it.setLibraryBooks()
+            }
         }
     }
 }

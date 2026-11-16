@@ -4,9 +4,12 @@ import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.text.Spannable
 import android.text.SpannableString
+import android.text.TextPaint
 import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
 import android.util.TypedValue
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -36,7 +39,9 @@ import com.lagradost.quicknovel.databinding.SingleLoadingBinding
 import com.lagradost.quicknovel.databinding.SingleOverscrollChapterBinding
 import com.lagradost.quicknovel.databinding.SingleSeparatorBinding
 import com.lagradost.quicknovel.databinding.SingleTextBinding
+import com.lagradost.quicknovel.mvvm.PokedexHelper
 import com.lagradost.quicknovel.mvvm.logError
+import com.lagradost.quicknovel.ui.result.PokemonDialog
 import com.lagradost.quicknovel.util.Apis
 import com.lagradost.quicknovel.util.UIHelper
 import com.lagradost.quicknovel.util.UIHelper.popupMenu
@@ -182,6 +187,7 @@ data class TextConfig(
     val backgroundColor: Int,
     val bionicReading: Boolean,
     val isTextSelectable: Boolean,
+    val highlightPokemon: Boolean,
     /** Vertical text padding in dp */
     val verticalPadding: Float,
 ) {
@@ -277,6 +283,12 @@ class TextAdapter(
     fun changeBionicReading(to: Boolean): Boolean {
         if (config.bionicReading == to) return false
         config = config.copy(bionicReading = to)
+        return true
+    }
+
+    fun changePokemonHighlight(enabled: Boolean): Boolean {
+        if (config.highlightPokemon == enabled) return false
+        config = config.copy(highlightPokemon = enabled)
         return true
     }
 
@@ -661,10 +673,16 @@ class TextAdapter(
             is SingleTextBinding -> {
                 binding.root.apply {
                     // this is set to fix the nonclick https://stackoverflow.com/questions/8641343/android-clickablespan-not-calling-onclick
-                    text = if (config.bionicReading) {
+                    val displayText = if (config.bionicReading) {
                         obj.bionicText
                     } else {
                         obj.text
+                    }
+
+                    text = if (config.highlightPokemon) {
+                        applyPokemonHighlights(displayText)
+                    } else {
+                        displayText
                     }
 
                     setTextIsSelectable(false) // this is so retarded
@@ -693,6 +711,32 @@ class TextAdapter(
 
             else -> {}
         }
+    }
+
+    private fun applyPokemonHighlights(text: CharSequence): CharSequence {
+        val spannable = SpannableString(text)
+
+        val matches = PokedexHelper.findPokemon(text.toString())
+
+        for (pokemon in matches) {
+            // Clickable Pokémon name
+            spannable.setSpan(
+                object : ClickableSpan() {
+                    override fun onClick(widget: View) {
+                        PokemonDialog.show(widget.context, pokemon)
+                    }
+
+                    override fun updateDrawState(ds: TextPaint) {
+                        ds.isUnderlineText = true
+                    }
+                },
+                pokemon.start,
+                pokemon.end,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        return spannable
     }
 
     fun updateTTSLine(binding: ViewBinding, span: TextSpan, line: TTSHelper.TTSLine?) {

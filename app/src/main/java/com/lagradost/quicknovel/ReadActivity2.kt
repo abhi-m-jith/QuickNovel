@@ -81,6 +81,9 @@ import kotlin.properties.Delegates
 import com.google.android.material.tabs.TabLayout
 import com.lagradost.cloudstream4.AppSettings
 import com.lagradost.quicknovel.ReadActivityViewModel.MLSettings.Companion.AUTO_LANG
+import com.lagradost.quicknovel.mvvm.BookHelper
+import com.lagradost.quicknovel.mvvm.PokedexHelper
+import com.lagradost.quicknovel.ui.result.ReplaceWordsBottomSheet
 import com.lagradost.quicknovel.util.SubtitleHelper
 import com.lagradost.quicknovel.util.UIHelper.fixSystemBarsPadding
 import kotlin.collections.map
@@ -455,6 +458,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     var lockBottom: Int? = null
     var currentScroll: Int = 0
 
+    private var readSettingsBottomSheet: BottomSheetDialog? = null
+
     private fun updateTTSLine(line: TTSHelper.TTSLine?, depth: Int = 0) {
         // update the visual component
         /*println("LINE: ${line?.speakOutMsg} =>")
@@ -705,6 +710,18 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     }
 
 
+
+    private fun openReplaceWordsDialog() {
+
+        ReplaceWordsBottomSheet.newInstance(bookId)
+            .show(supportFragmentManager, "ReplaceWordsBottomSheet")
+    }
+
+
+    private val bookId= BookHelper.current_book_ID
+
+
+
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
         CommonActivity.loadThemes(this)
@@ -714,6 +731,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         setContentView(binding.root)
         fixSystemBarsPadding(binding.readerBottomViewHolder, padTop = false, overlayCutout = false)
         fixSystemBarsPadding(binding.readToolbarHolder, padBottom = false, overlayCutout = false)
+        PokedexHelper.load(applicationContext)
 
         registerBattery()
 
@@ -732,6 +750,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 bionicReading = viewModel.bionicReading,
                 isTextSelectable = viewModel.isTextSelectable,
                 verticalPadding = viewModel.textVerticalPadding,
+                highlightPokemon = viewModel.highlightPokemon,
+
             ).also { config ->
                 updateOtherTextConfig(config)
             }
@@ -782,6 +802,12 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 updateTextAdapterConfig()
             }
         }
+        observe(viewModel.highlightPokemonLive) { color ->
+            if (textAdapter.changePokemonHighlight(color)) {
+                updateTextAdapterConfig()
+            }
+        }
+
         observe(viewModel.isTextSelectableLive) { isTextSelectable ->
             if (textAdapter.changeTextSelectable(isTextSelectable)) {
                 updateTextAdapterConfig()
@@ -1541,6 +1567,13 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                     viewModel.reloadChapter()
                 }
 
+                replaceScreen.setOnClickListener {
+                    readSettingsBottomSheet?.dismiss()
+                    readSettingsBottomSheet = null
+
+                    openReplaceWordsDialog()
+                }
+
                 readSettingsScrollVol.isChecked = viewModel.scrollWithVolume
                 readSettingsScrollVol.setOnCheckedChangeListener { _, isChecked ->
                     viewModel.scrollWithVolume = isChecked
@@ -1557,6 +1590,11 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 readSettingsShowBionic.isChecked = viewModel.bionicReading
                 readSettingsShowBionic.setOnCheckedChangeListener { _, isChecked ->
                     viewModel.bionicReading = isChecked
+                }
+
+                readSettingsShowPokemonHighlight.isChecked = viewModel.highlightPokemon
+                readSettingsShowPokemonHighlight.setOnCheckedChangeListener { _, isChecked ->
+                    viewModel.highlightPokemon = isChecked
                 }
 
                 readSettingsIsTextSelectable.isChecked = viewModel.isTextSelectable

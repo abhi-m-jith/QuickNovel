@@ -72,7 +72,6 @@ class APIRepository(val api: MainAPI) {
     val mainCategories: List<Pair<String, String>> get() = api.mainCategories
     val orderBys: List<Pair<String, String>> get() = api.orderBys
     val tags: List<Pair<String, String>> get() = api.tags
-    val infiniteScroll : Boolean get() = api.infiniteScroll
 
 
     suspend fun load(url: String, allowCache: Boolean = true): Resource<LoadResponse> {
@@ -163,31 +162,54 @@ class APIRepository(val api: MainAPI) {
             }
         }
 
-    suspend fun search(query: String): Resource<List<SearchResponse>> {
+    suspend fun search(
+        query: String
+    ): Resource<List<SearchResponse>> {
         return safeApiCall {
             try {
-                api.search(query) ?: throw ErrorLoadingException("No data")
-            }
-            catch(e: NotImplementedError)
-            {
-               android.util.Log.d("Search", "Provider ${api.name} hasn't implemented Normal search yet")
-                api.search(query,1) ?: throw ErrorLoadingException("No data")
-            }
-        }
-    }
-    suspend fun search(query: String,page: Int): Resource<List<SearchResponse>> {
-        return safeApiCall {
-            try {
-                api.search(query, page) ?: throw ErrorLoadingException("No data")
+                api.search(query)
+                    ?: throw ErrorLoadingException("No data")
             } catch (e: NotImplementedError) {
-                android.util.Log.d("Search", "Provider ${api.name} hasn't implemented Infinite search yet")
-                emptyList<SearchResponse>()
+                android.util.Log.d(
+                    "Search",
+                    "Provider ${api.name} hasn't implemented normal search"
+                )
+
+                api.search(query, 1) ?: throw ErrorLoadingException("No data")
             }
         }
     }
 
-    suspend fun searchResult(query: String): Result<List<ImmutableSearchResponse>> = runCatching {
-        api.search(query)?.map(ImmutableSearchResponse::from)
+    suspend fun search(
+        query: String,
+        page: Int
+    ): Resource<List<SearchResponse>> {
+        return safeApiCall {
+            try {
+                api.search(query, page)?: emptyList()
+            } catch (e: NotImplementedError) {
+                android.util.Log.d(
+                    "Search",
+                    "Provider ${api.name} hasn't implemented infinite search"
+                )
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun searchResult(query: String,page: Int = 1): Result<List<ImmutableSearchResponse>> = runCatching {
+        val response = if (page == 1) {
+            try {
+                api.search(query)
+            } catch (e: NotImplementedError) {
+                api.search(query, page)
+            }
+        } else {
+            api.search(query, page)
+        }
+
+        response
+            ?.map(ImmutableSearchResponse::from)
             ?: throw ErrorLoadingException("No data")
     }
 

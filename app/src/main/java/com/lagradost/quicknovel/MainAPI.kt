@@ -38,6 +38,12 @@ abstract class MainAPI {
     val hasRateLimit: Boolean get() = rateLimitTime > 0L
     val rateLimitMutex: Mutex = Mutex()
 
+    open var isChapterCountFilterNeeded=false
+    open var ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
+    open var isOpeningBook=false
+    open var isSearching=false
+    open var isLastPage=false
+
     // DECLARE HAS ACCESS TO MAIN PAGE INFORMATION
     open val hasMainPage = false
 
@@ -70,12 +76,25 @@ abstract class MainAPI {
         throw NotImplementedError()
     }
 
+    open suspend fun search(query: String,page: Int): List<SearchResponse>? {
+        throw NotImplementedError()
+    }
+
     open suspend fun load(url: String): LoadResponse? {
+        isOpeningBook=true
         throw NotImplementedError()
     }
 
     open suspend fun loadHtml(url: String): String? {
         throw NotImplementedError()
+    }
+
+    open fun FABFilterApplied()
+    {
+    }
+    open fun ResetFiltersandPage()
+    {
+        android.util.Log.d("RESET FILTER","Filter has been Reset")
     }
 
     /*open suspend fun loadEpub(link: DownloadLinkType): ByteArray {
@@ -196,6 +215,8 @@ data class SearchResponse(
     var genre: List<String>? = null,
     var tags: List<String>? = null,
     var contentWarnings: List<String>? = null,
+    var totalChapterCount:String? = null,
+    var bookReadStatus:String?=null,
 ) {
     var score get() = Score.fromOld(this.rating)
         set(value) {
@@ -209,12 +230,16 @@ fun MainAPI.newSearchResponse(
     name: String,
     url: String,
     fix: Boolean = true,
+    chapterCount: String? = null,
     initializer: SearchResponse.() -> Unit = { },
 ): SearchResponse {
+    val myReadStatus=LibraryHelper.getBookmarkForBook(name)
     val builder = SearchResponse(
         name = name,
         url = if (fix) fixUrl(url) else url,
-        apiName = this.name
+        apiName = this.name,
+        totalChapterCount = chapterCount,
+        bookReadStatus = myReadStatus
     )
     builder.initializer()
     builder.posterHeaders = fixPosterHeaders(builder.posterHeaders)

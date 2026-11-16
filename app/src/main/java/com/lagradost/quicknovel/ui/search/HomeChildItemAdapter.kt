@@ -3,12 +3,14 @@ package com.lagradost.quicknovel.ui.search
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import androidx.core.view.isVisible
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.databinding.HomeResultGridBinding
 import com.lagradost.quicknovel.ui.BaseDiffCallback
 import com.lagradost.quicknovel.ui.NoStateAdapter
 import com.lagradost.quicknovel.ui.ViewHolderState
 import com.lagradost.quicknovel.ui.newSharedPool
+import com.lagradost.quicknovel.util.AppUtils.toJson
 import com.lagradost.quicknovel.util.UIHelper.hideKeyboard
 import com.lagradost.quicknovel.util.UIHelper.setImage
 
@@ -56,6 +58,39 @@ class HomeChildItemAdapter(
                 }
             }
             imageText.text = item.name
+            val InLibrary=item.bookReadStatus
+
+            android.util.Log.d("AAAAAAAAAAAAAAAAAAAAA",item.name)
+
+            if(InLibrary != null && InLibrary != "NONE")
+            {
+                libraryOverlay.isVisible = true
+                libraryOverlay.text = "$InLibrary"
+                chapterCountOverlay.isVisible = false
+            }
+            else{
+                libraryOverlay.isVisible=false
+
+                // Only show chapter count overlay if it's not null/blank
+                val chapterCountStr = item.totalChapterCount
+
+                if (!chapterCountStr.isNullOrBlank()) {
+                    val chapterCount = chapterCountStr.toIntOrNull()
+
+                    chapterCountOverlay.isVisible = true
+                    chapterCountOverlay.text = if (chapterCount != null && chapterCount > 0) {
+                        "$chapterCount ch"
+                    }
+                    else {
+                        if(chapterCount==0){
+                            chapterCountOverlay.isVisible = false
+                        }
+                        "$chapterCountStr ch" // fallback to string like "V5 46"
+                    }
+                } else {
+                    chapterCountOverlay.isVisible = false
+                }
+            }
         }
     }
 }

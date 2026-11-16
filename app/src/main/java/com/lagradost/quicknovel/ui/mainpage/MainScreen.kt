@@ -66,6 +66,7 @@ fun MainScreenDialog(
         DialogType.Tags -> stringResource(R.string.filter_dialog_genre)
         DialogType.Category -> stringResource(R.string.filter_dialog_general)
         DialogType.OrderBy -> stringResource(R.string.filter_dialog_order_by)
+        DialogType.ChapterCount -> "Chapter Count"
     }
 
     SingleSelectDialog(
@@ -137,7 +138,8 @@ fun MainPageScreen(state: MainPageState, action: (MainPageAction) -> Unit) {
                 action = action,
                 query = state.filterVisual,
                 scrollBehavior = scrollBehavior,
-                apiName = state.apiName
+                apiName = state.apiName,
+                isChapterCountFilterNeeded = state.isChapterCountFilterNeeded
             )
         },
         modifier = Modifier
@@ -159,9 +161,36 @@ fun MainPageScreen(state: MainPageState, action: (MainPageAction) -> Unit) {
             searchAction = searchAction,
         )
 
-        LaunchedEffect(shouldLoadMore.value) {
-            if (shouldLoadMore.value && state.filter.error == null && !state.filter.loading) {
-                action(MainPageAction.Expand)
+        LaunchedEffect(
+            shouldLoadMore.value,
+            state.openQuery,
+            state.filter.loading,
+            state.query.loading,
+            state.query.loadingMore,
+            state.query.hasMore,
+            state.filter.error,
+            state.query.error
+        ) {
+            if (!shouldLoadMore.value) return@LaunchedEffect
+
+            if (state.openQuery) {
+                // Search pagination
+                if (
+                    !state.query.loading &&
+                    !state.query.loadingMore &&
+                    state.query.hasMore &&
+                    state.query.error == null
+                ) {
+                    action(MainPageAction.ExpandSearch)
+                }
+            } else {
+                // Main-page pagination
+                if (
+                    !state.filter.loading &&
+                    state.filter.error == null
+                ) {
+                    action(MainPageAction.Expand)
+                }
             }
         }
     }
@@ -252,6 +281,7 @@ fun MainPageSearchBar(
     action: (MainPageAction) -> Unit,
     scrollBehavior: TopAppBarScrollBehavior,
     apiName: String,
+    isChapterCountFilterNeeded : Boolean,
 ) {
     val settings = rememberAppSettings()
     val searchIsRow = settings.main.isRow
@@ -341,6 +371,14 @@ fun MainPageSearchBar(
                     SelectButton(it) {
                         action(MainPageAction.OpenDialog(DialogType.Tags))
                     }
+                }
+                if (isChapterCountFilterNeeded) {
+                    SelectButton(
+                        text = query.chaptercount ?: "Chapter Count",
+                        onClick = {
+                            action(MainPageAction.OpenDialog(DialogType.ChapterCount))
+                        }
+                    )
                 }
             }
         }

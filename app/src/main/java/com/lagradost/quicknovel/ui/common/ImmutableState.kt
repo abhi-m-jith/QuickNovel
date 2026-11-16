@@ -276,6 +276,10 @@ data class ImmutableSearchResponse(
     val contentWarnings : PersistentList<String>? = null,
     /** What genre is this content? This is slightly different from tags */
     val genre : PersistentList<String>? = null,
+    /** Use in provider home screen*/
+    var totalChapterCount:String? = null,
+    /** Checking books state in library*/
+    var bookReadStatus:String?=null,
 ) {
     val chapters: Int? get() = loadData?.chapters?.size ?: visualTotalChapters
     val isImported: Boolean get() = (apiName == IMPORT_SOURCE || apiName == IMPORT_SOURCE_PDF)
@@ -498,7 +502,9 @@ data class ImmutableSearchResponse(
                 contentWarnings = response.contentWarnings?.toPersistentList(),
                 tags = response.tags?.toPersistentList(),
                 genre = response.genre?.toPersistentList(),
-                synopsis = response.synopsis
+                synopsis = response.synopsis,
+                totalChapterCount = response.totalChapterCount,
+                bookReadStatus = response.bookReadStatus
             )
 
         fun defaultDownloadState(id: Int) =

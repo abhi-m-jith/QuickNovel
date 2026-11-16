@@ -14,6 +14,7 @@ import com.lagradost.cloudstream4.state.SingleActiveQuery
 import com.lagradost.cloudstream4.state.StateContainer
 import com.lagradost.quicknovel.APIRepository
 import com.lagradost.quicknovel.BookDownloader2
+import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.downloader.BookReader
 import com.lagradost.quicknovel.ui.common.ImmutableSearchResponse
 import com.lagradost.quicknovel.ui.common.SearchResponseAction
@@ -29,6 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.util.concurrent.CancellationException
+import kotlin.Boolean
 
 @Immutable
 data class MainPageState(
@@ -38,14 +40,18 @@ data class MainPageState(
     val query: QueryState = QueryState(),
     val dialog: MainPageDialog? = null,
     val apiName: String,
+    val isChapterCountFilterNeeded : Boolean = false,
 )
 
 @Immutable
 data class QueryState(
     val loading: Boolean = true,
+    val loadingMore: Boolean = false,
     val query: String = "",
     val items: PersistentList<ImmutableSearchResponse> = persistentListOf(),
     val error: Throwable? = null,
+    val page: Int = 0,
+    val hasMore: Boolean = true,
 )
 
 @Immutable
@@ -62,6 +68,7 @@ data class FilterQueryVisual(
     val category: String? = null,
     val orderBy: String? = null,
     val tag: String? = null,
+    val chaptercount: String?=null,
 )
 
 @Immutable
@@ -70,10 +77,12 @@ data class FilterQuery(
     val category: Int = 0,
     val orderBy: Int = 0,
     val tag: Int = 0,
+    val chapterCount: LibraryHelper.ChapterCountFilter =
+        LibraryHelper.ChapterCountFilter.ALL,
 )
 
 enum class DialogType {
-    Tags, Category, OrderBy
+    Tags, Category, OrderBy,ChapterCount
 }
 
 @Immutable
@@ -89,6 +98,7 @@ sealed class MainPageAction {
 
     data class Search(val data: String) : MainPageAction()
     object Expand : MainPageAction()
+    object ExpandSearch : MainPageAction()
     data class OpenInBrowser(val url: String) : MainPageAction()
     object Back : MainPageAction()
     object Dismiss : MainPageAction()
@@ -106,7 +116,7 @@ class MainPageViewModel2(
     initQuery: FilterQuery,
 ) : ViewModel(), StateContainer<MainPageState> by DefaultStateContainer(
     MainPageState(
-        filter = FilterState(query = initQuery), apiName = api.name
+        filter = FilterState(query = initQuery), apiName = api.name,isChapterCountFilterNeeded = api.api.isChapterCountFilterNeeded
     )
 ), EffectContainer<MainPageEffect> by DefaultEffectContainer(), ActionHandler<MainPageAction> {
     companion object {
@@ -116,15 +126,17 @@ class MainPageViewModel2(
                 val orderBy = bundle.getInt("orderBy", 0)
                 val tag = bundle.getInt("tag", 0)
                 val apiName = bundle.getString("apiName")!!
+                val api = getApiFromName(apiName)
                 MainPageViewModel2(
-                    getApiFromName(apiName),
-                    FilterQuery(page = 0, category = mainCategory, tag = tag, orderBy = orderBy)
+                    api,
+                    FilterQuery(page = 0, category = mainCategory, tag = tag, orderBy = orderBy, chapterCount = api.api.ChapterFilter)
                 )
             }
         }
     }
 
     private val expandMutex = Mutex()
+    private val searchExpandMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -133,11 +145,11 @@ class MainPageViewModel2(
     }
 
     suspend fun expand() = withContext(Dispatchers.IO) {
-        val from = state.value.filter.query
-        val fromList = state.value.filter.items
 
+        expandMutex.lock()
         try {
-            expandMutex.lock()
+            val from = state.value.filter.query
+            val fromList = state.value.filter.items
             if (from != state.value.filter.query) return@withContext
 
             val mainCategory = api.mainCategories.getOrNull(from.category)
@@ -146,7 +158,7 @@ class MainPageViewModel2(
             updateState {
                 copy(
                     filterVisual = FilterQueryVisual(
-                        category = mainCategory?.first, tag = tag?.first, orderBy = orderBy?.first
+                        category = mainCategory?.first, tag = tag?.first, orderBy = orderBy?.first,chaptercount = from.chapterCount.displayName
                     ), filter = filter.copy(
                         loading = true,
                     )
@@ -197,30 +209,162 @@ class MainPageViewModel2(
 
     val searchQuery = SingleActiveQuery(Dispatchers.IO)
     suspend fun search(queryText: String) = searchQuery.launch {
+
+        // Reset API pagination state
+        api.api.isLastPage = false
+        api.api.isSearching = true
+
         updateState {
-            copy(openQuery = true, query = query.copy(loading = true, items = persistentListOf()))
+            copy(
+                openQuery = true,
+                query = query.copy(
+                    loading = true,
+                    loadingMore = false,
+                    query = queryText,
+                    items = persistentListOf(),
+                    error = null,
+                    page = 0,
+                    hasMore = true
+                )
+            )
         }
-        api.searchResult(queryText).onFailure { error ->
-            if (error is CancellationException) {
-                return@launch
+
+        try {
+            api.searchResult(queryText, 1)
+                .onFailure { error ->
+
+                    if (error is CancellationException) {
+                        return@launch
+                    }
+
+                    updateState {
+                        copy(
+                            query = query.copy(
+                                loading = false,
+                                loadingMore = false,
+                                error = error
+                            )
+                        )
+                    }
+
+                    postEffect {
+                        MainPageEffect.ErrorLoading(error)
+                    }
+                }
+                .onSuccess { response ->
+
+                    updateState {
+                        // Ignore outdated search results
+                        if (query.query != queryText) {
+                            return@updateState this
+                        }
+
+                        copy(
+                            query = query.copy(
+                                items = response.toPersistentList(),
+                                loading = false,
+                                loadingMore = false,
+                                error = null,
+                                page = 1,
+                                hasMore = response.isNotEmpty() && !api.api.isLastPage
+                            )
+                        )
+                    }
+                }
+        } finally {
+            api.api.isSearching = false
+        }
+    }
+
+    suspend fun expandSearch() = withContext(Dispatchers.IO) {
+
+        searchExpandMutex.lock()
+
+        try {
+            val from = state.value.query
+
+            // Do not load if search is already loading
+            if (from.loading ||
+                from.loadingMore ||
+                !from.hasMore ||
+                from.query.isBlank()
+            ) {
+                return@withContext
             }
-            updateState {
-                copy(query = query.copy(loading = false, error = error))
-            }
-            postEffect {
-                MainPageEffect.ErrorLoading(error)
-            }
-        }.onSuccess { response ->
+
+            val nextPage = from.page + 1
+
+            // Update loading state
             updateState {
                 copy(
                     query = query.copy(
-                        items = response.toPersistentList(),
-                        loading = false,
-                        error = null,
-                        query = queryText,
+                        loadingMore = true,
+                        error = null
                     )
                 )
             }
+
+            api.api.isSearching = true
+
+            try {
+                api.searchResult(
+                    query = from.query,
+                    page = nextPage
+                ).onFailure { error ->
+
+                    if (error is CancellationException) {
+                        return@withContext
+                    }
+
+                    updateState {
+                        // Ignore results belonging to an old search
+                        if (query.query != from.query) {
+                            return@updateState this
+                        }
+
+                        copy(
+                            query = query.copy(
+                                loadingMore = false,
+                                error = error
+                            )
+                        )
+                    }
+
+                    postEffect {
+                        MainPageEffect.ErrorLoading(error)
+                    }
+
+                }.onSuccess { response ->
+
+                    updateState {
+
+                        // Search changed while this request was running
+                        if (query.query != from.query) {
+                            return@updateState copy(
+                                query = query.copy(loadingMore = false)
+                            )
+                        }
+
+                        // Append new results
+                        val newList = query.items.addingAll(response)
+
+                        copy(
+                            query = query.copy(
+                                items = newList,
+                                page = nextPage,
+                                loadingMore = false,
+                                error = null,
+                                hasMore = response.isNotEmpty() && !api.api.isLastPage
+                            )
+                        )
+                    }
+                }
+            } finally {
+                api.api.isSearching = false
+            }
+
+        } finally {
+            searchExpandMutex.unlock()
         }
     }
 
@@ -242,6 +386,16 @@ class MainPageViewModel2(
                     expand()
                 }
             }
+            is MainPageAction.ExpandSearch -> {
+                if (state.value.query.loading ||
+                    state.value.query.loadingMore ||
+                    !state.value.query.hasMore
+                ) return
+
+                viewModelScope.launch {
+                    expandSearch()
+                }
+            }
 
             is MainPageAction.OpenInBrowser -> {
                 openInBrowser(action.url)
@@ -253,10 +407,11 @@ class MainPageViewModel2(
 
             is MainPageAction.OpenDialog -> {
                 val names = when (action.type) {
-                    DialogType.Category -> api.mainCategories
-                    DialogType.Tags -> api.tags
-                    DialogType.OrderBy -> api.orderBys
-                }.map { it.first }
+                    DialogType.Category -> api.mainCategories.map { it.first }
+                    DialogType.Tags -> api.tags.map { it.first }
+                    DialogType.OrderBy -> api.orderBys.map { it.first }
+                    DialogType.ChapterCount -> LibraryHelper.ChapterCountFilter.values().map { it.displayName }
+                }
                 updateState {
                     copy(
                         dialog = MainPageDialog(
@@ -264,6 +419,7 @@ class MainPageViewModel2(
                                 DialogType.Category -> filter.query.category
                                 DialogType.Tags -> filter.query.tag
                                 DialogType.OrderBy -> filter.query.orderBy
+                                DialogType.ChapterCount -> filter.query.chapterCount.ordinal
                             }, options = names.toPersistentList(), type = action.type
                         )
                     )
@@ -271,6 +427,19 @@ class MainPageViewModel2(
             }
 
             is MainPageAction.SelectDialog -> {
+                val selectedChapterCount =
+                    if (action.type == DialogType.ChapterCount) {
+                        LibraryHelper.ChapterCountFilter.values()
+                            .getOrElse(action.selected) {
+                                LibraryHelper.ChapterCountFilter.ALL
+                            }
+                    } else {
+                        state.value.filter.query.chapterCount
+                    }
+                if (action.type == DialogType.ChapterCount) {
+                    api.api.ChapterFilter = selectedChapterCount
+                }
+
                 updateState {
                     copy(
                         filter = filter.copy(
@@ -278,6 +447,7 @@ class MainPageViewModel2(
                                 tag = if (action.type == DialogType.Tags) action.selected else filter.query.tag,
                                 category = if (action.type == DialogType.Category) action.selected else filter.query.category,
                                 orderBy = if (action.type == DialogType.OrderBy) action.selected else filter.query.orderBy,
+                                chapterCount = selectedChapterCount,
                                 page = 0,
                             ), items = persistentListOf(), error = null, url = ""
                         ), dialog = null

@@ -343,4 +343,6 @@
     <string name="apk_installer_legacy">Legacy</string>
     <string name="apk_installer_package_installer">PackageInstaller</string>
     <string name="spoilers">Spoilers</string>
+
+    <string name="add" translatable="false">Add</string>
 </resources>

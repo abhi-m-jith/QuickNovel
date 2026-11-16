@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lagradost.cloudstream4.compose.CloudStreamThemeAppSettings
@@ -44,7 +45,9 @@ class MainPageFragment : Fragment() {
                 putInt("tag", filter.tag)
             }
     }
-
+    private val viewModel: MainPageViewModel2 by viewModels {
+        MainPageViewModel2.provideFactory(requireArguments())
+    }
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -53,9 +56,6 @@ class MainPageFragment : Fragment() {
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
         setContent {
-            val viewModel: MainPageViewModel2 =
-                viewModel(factory = MainPageViewModel2.provideFactory(requireArguments()))
-
             CloudStreamThemeAppSettings {
                 val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -66,6 +66,19 @@ class MainPageFragment : Fragment() {
                 }
                 MainPageScreen(state,viewModel::onAction)
             }
+        }
+    }
+
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        if(!viewModel.api.api.isOpeningBook && !viewModel.api.api.isSearching)
+        {
+            viewModel.api.api.ResetFiltersandPage()
+        }
+        else
+        {
+            viewModel.api.api.isOpeningBook=false
         }
     }
 }

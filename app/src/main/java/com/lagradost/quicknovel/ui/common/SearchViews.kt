@@ -45,12 +45,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.lagradost.cloudstream4.compose.RoundedShape
 import com.lagradost.cloudstream4.compose.circle
@@ -535,7 +537,44 @@ fun SearchResponseItem(
                     contentDescription = response.name,
                     modifier = Modifier.fillMaxSize()
                 )
-
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ){
+                    val InLibrary=response.bookReadStatus
+                    if(InLibrary != null && InLibrary != "NONE") {
+                        Text(
+                            text = InLibrary,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .rounded()
+                                .background(colorResource(R.color.boxNovelColor))
+                                .padding(
+                                    horizontal = 6.dp,
+                                    vertical = 2.dp
+                                )
+                        )
+                    }
+                    else{
+                        if (!response.totalChapterCount.isNullOrBlank()) {
+                            Text(
+                                text = "${response.totalChapterCount} ch",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                modifier = Modifier
+                                    .rounded()
+                                    .background(colorResource(R.color.boxNovelColor))
+                                    .padding(
+                                        horizontal = 6.dp,
+                                        vertical = 2.dp
+                                    )
+                            )
+                        }
+                    }
+                }
                 when (response.slopStatus) {
                     SlopStatus.AiAssisted, SlopStatus.AiGenerated -> {
                         Text(

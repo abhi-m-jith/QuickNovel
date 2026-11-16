@@ -58,18 +58,22 @@ class ReplaceWordsAdapter(
 
         // row click for editing
         holder.itemView.setOnClickListener {
-            if (selectedIndex == position) {
+            val currentPosition = holder.bindingAdapterPosition
+            if (currentPosition == RecyclerView.NO_POSITION) return@setOnClickListener
+
+            val currentItem = items[currentPosition]
+            if (selectedIndex == currentPosition) {
                 selectedIndex = null
-                notifyItemChanged(position)
-                onItemClick(item, -1) // deselect
+                notifyItemChanged(currentPosition)
+                onItemClick(currentItem, -1) // deselect
             } else {
                 val old = selectedIndex
-                selectedIndex = position
+                selectedIndex = currentPosition
                 old?.let { notifyItemChanged(it) }
-                notifyItemChanged(position)
-                onItemClick(item, position)
+                notifyItemChanged(currentPosition)
+                onItemClick(currentItem, currentPosition)
 
-                android.util.Log.d("BOOK HELPER","Selected: $position  index: $selectedIndex")
+                android.util.Log.d("BOOK HELPER","Selected: $currentPosition  index: $selectedIndex")
             }
         }
     }

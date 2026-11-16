@@ -1,34 +1,68 @@
 package com.lagradost.quicknovel.providers
 
-import android.os.Debug
+import android.net.Uri
 import android.util.Log
-import com.lagradost.quicknovel.*
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.lagradost.quicknovel.ChapterData
 import com.lagradost.quicknovel.CommonActivity.showToast
-import com.lagradost.quicknovel.MainActivity.Companion.app
+import com.lagradost.quicknovel.ErrorLoadingException
+import com.lagradost.quicknovel.HeadMainPageResponse
+import com.lagradost.quicknovel.LibraryHelper
+import com.lagradost.quicknovel.LoadResponse
+import com.lagradost.quicknovel.MainAPI
+import com.lagradost.quicknovel.MainActivity
+import com.lagradost.quicknovel.R
+import com.lagradost.quicknovel.ReleaseStatus
+import com.lagradost.quicknovel.Score
+import com.lagradost.quicknovel.SearchResponse
+import com.lagradost.quicknovel.UserReview
+import com.lagradost.quicknovel.fixUrl
+import com.lagradost.quicknovel.fixUrlNull
+import com.lagradost.quicknovel.newChapterData
+import com.lagradost.quicknovel.newReview
+import com.lagradost.quicknovel.newSearchResponse
+import com.lagradost.quicknovel.newStreamResponse
+import com.lagradost.quicknovel.providers.NovelFireAPI.AjaxChapterRoot
+import com.lagradost.quicknovel.setStatus
+import com.lagradost.quicknovel.util.AppUtils.toJson
 import com.lagradost.quicknovel.utils.SessionCookieProvider
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
+import org.jsoup.Jsoup
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToInt
 import org.json.JSONObject
+import org.jsoup.select.Elements
+import kotlin.coroutines.CoroutineContext
 
+class LruCache<K, V>(private val maxSize: Int) : LinkedHashMap<K, V>(maxSize, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean {
+        return size > maxSize
+    }
+}
 
 private var cachedCookies: String? = null
 private var cachedCsrfToken: String? = null
 
-private val chapterContentCache = LruCache<String, String>(20) // Cache last 20 chapter contents
 
-class WebnovelFanficProvider : MainAPI() {
+
+object WebnovelFanficProvider : WebnovelFanficAPI()
+
+open class WebnovelFanficAPI : MainAPI(){
     override val name = "Webnovel (Fanfic)"
     override val mainUrl = "https://m.webnovel.com"
+    override val iconId = R.drawable.icon_webnovel
+    override val rateLimitTime = 500L
+    override val usesCloudFlareKiller = true
     override val hasMainPage = true
-    override val iconId = R.drawable.icon_webnovel // Replace with your actual icon
-    override val infiniteScroll=true
+    override val hasReviews = true
 
     companion object {
         const val MOBILE_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.131 Mobile Safari/537.36"
     }
 
-    // Category mappings for fanfiction types
     override val tags = listOf(
         "All" to "fanfic",
         "Anime & Comics" to "fanfic-anime-comics",
@@ -67,31 +101,37 @@ class WebnovelFanficProvider : MainAPI() {
         cachedCsrfToken = csrfToken
     }
 
-    var lastLoadedPage = 1
+    private fun getCategoryIdFromTag(tag: String): String {
+        return when (tag) {
+            "fanfic-anime-comics" -> "81006"
+            "fanfic-video-games" -> "81005"
+            "fanfic-celebrities" -> "81002"
+            "fanfic-music-bands" -> "81003"
+            "fanfic-movies" -> "81007"
+            "fanfic-book-literature" -> "81001"
+            "fanfic-tv" -> "81008"
+            "fanfic-theater" -> "81004"
+            "fanfic-others" -> "81009"
+            "fanfic" -> "0"
+            else -> "0"
+        }
+    }
+
+    override var isChapterCountFilterNeeded=true
+    var lastLoadedPage=1
     val minBooksNeeded=11
-    val maxPagesToFetch=20
+    val maxPagesToFetch=10
 
 
     val seenUrls = HashSet<String>()
 
     override fun FABFilterApplied() {
-        //super.FABClicked()
-        lastLoadedPage= 1
+        lastLoadedPage=1
         seenUrls.clear()
-        //Log.d("WEBNOVEL","Last page: ${lastLoadedPage}")
     }
-
     override fun ResetFiltersandPage() {
         FABFilterApplied()
-        ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
-    }
-
-    fun logLong(tag: String, message: String) {
-        val maxLogSize = 4000
-        for (i in 0..message.length step maxLogSize) {
-            val end = (i + maxLogSize).coerceAtMost(message.length)
-            Log.d(tag, message.substring(i, end))
-        }
+        ChapterFilter= LibraryHelper.ChapterCountFilter.ALL
     }
 
     override suspend fun loadMainPage(
@@ -100,10 +140,7 @@ class WebnovelFanficProvider : MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-
         ensureCookiesLoaded()
-
-        isChapterCountFilterNeeded=true
 
         val slug = tag ?: "fanfic"
         val categoryId = getCategoryIdFromTag(slug)
@@ -111,9 +148,6 @@ class WebnovelFanficProvider : MainAPI() {
         var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page
         val collectedResults = mutableListOf<SearchResponse>()
         var pagesFetched = 0
-
-
-        //var apiUrl = "$mainUrl/go/pcm/category/categoryAjax?_csrfToken=$cachedCsrfToken&language=en&categoryId=$categoryId&categoryType=4&orderBy=$orderBy&pageIndex=$page&bookStatus=$mainCategory"
 
         fun fetchPage(p: Int,Retry:Boolean=false): Pair<List<SearchResponse>, Boolean> {
             val apiUrl =
@@ -191,54 +225,217 @@ class WebnovelFanficProvider : MainAPI() {
 
 
         }
-
-        // Keep fetching pages until enough results or end of listing
+        // Keep fetching until we have enough or reach a reasonable limit
         while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
             val (pageResults, hadRawItems) = fetchPage(currentPage)
-            Log.e("WEBNOVEL","Current Page: ${currentPage} ${collectedResults.size}")
 
-            if (!hadRawItems) break // stop if API returned no items (end)
+            // If there were no raw items on this page, it's the end — break
+            if (!hadRawItems) break
 
+            // Add whatever passed the filters (could be empty) and continue to next page if needed
             if (pageResults.isNotEmpty()) {
                 collectedResults.addAll(pageResults)
             }
 
+            // Prepare for next iteration
             currentPage++
             pagesFetched++
-            Thread.sleep(1000)
         }
-        //Log.d("WEBNOVEL","Final: ${collectedResults.size} Last page: ${lastLoadedPage}")
-        val apiUrl =
-            "$mainUrl/go/pcm/category/categoryAjax?_csrfToken=$cachedCsrfToken&language=en&categoryId=$categoryId&categoryType=4&orderBy=$orderBy&pageIndex=$lastLoadedPage&bookStatus=$mainCategory"
+
+        val url = "$mainUrl/genre-${tag}/${orderBy}/${mainCategory}/all-novel?page=${lastLoadedPage}"
+
+        return HeadMainPageResponse(url,collectedResults)
+    }
+
+
+    override suspend fun load(url: String): LoadResponse {
+        ensureCookiesLoaded()
+
+        val bookId = url.substringAfterLast("/")
+
+        // Fetch book info from API
+        val detailUrl = "$mainUrl/go/pcm/book/get-book-detail?_csrfToken=$cachedCsrfToken&bookId=$bookId"
+        val infoRequest = Request.Builder()
+            .url(detailUrl)
+            .addHeader("User-Agent", MOBILE_USER_AGENT)
+            .addHeader("Cookie", cachedCookies!!)
+            .build()
+        Log.d("WebNovel","${detailUrl}")
+
+        val client = OkHttpClient()
+        val infoResponse = client.newCall(infoRequest).execute()
+        val infoBody = infoResponse.body?.string() ?: throw ErrorLoadingException("Empty book info")
+
+        val bookInfo = JSONObject(infoBody)
+            .getJSONObject("data")
+            .getJSONObject("bookInfo")
+
+        val recommendInfo= JSONObject(infoBody)
+            .getJSONObject("data")
+            .getJSONArray("recommendListItems")
+
+        val title = bookInfo.optString("bookName", "Untitled")
+        val author = bookInfo.optString("authorName", "Unknown")
+        val description = bookInfo.optString("description", "")
+        val views=bookInfo.optString("pvNum","0")
+        val starscore=bookInfo.optString("totalScore","0")
+        val totalvotes=bookInfo.optString("voters","0")
+        val cover = "https://book-pic.webnovel.com/bookcover/$bookId?imageMogr2/thumbnail/180x|imageMogr2/format/webp|imageMogr2/quality/70!"
+        val status = when (bookInfo.optInt("actionStatus", 0)) {
+            30 -> ReleaseStatus.Ongoing
+            50 -> ReleaseStatus.Completed
+            else -> ReleaseStatus.Paused
+        }
+
+        val catalogUrl = "$mainUrl/book/$bookId/catalog"
+        val catalogRequest = Request.Builder()
+            .url(catalogUrl)
+            .addHeader("User-Agent", MOBILE_USER_AGENT)
+            .addHeader("Cookie", cachedCookies!!)
+            .build()
+
+        val catalogResponse = client.newCall(catalogRequest).execute()
+        val catalogHtml = catalogResponse.body?.string() ?: throw ErrorLoadingException("Empty catalog page")
+
+        val doc = Jsoup.parse(catalogHtml)
+        val chapterLinks = doc.select("a.lh24.db.oh.fs14.clearfix.g_row.pr.pt8.pb8")
+
+        val chapters = getChapters(chapterLinks)
+
+
+        return newStreamResponse(title, fixUrl(url), chapters) {
+            this.author = author
+            this.posterUrl = fixUrlNull(cover)
+            this.synopsis = description
+            this.status= status
+
+            this.views = views.let {
+                if (it.contains("k", true)) it.replace("k", "", true).toFloatOrNull()
+                    ?.times(1000)?.roundToInt()
+                else if (it.contains("m", true)) it.replace("m", "", true).toFloatOrNull()
+                    ?.times(1000000)?.roundToInt()
+                else it.toIntOrNull()
+            }
+
+            this.peopleVoted =totalvotes.replace(Regex("[^0-9]"), "").trim().toIntOrNull() ?: 0
+            score = Score.from5(starscore)
+            related = getRelated(recommendInfo)
+            reviewData = bookId
+        }
+    }
+
+    open suspend fun getChapters(chapterLinks : Elements): List<ChapterData> {
+
+        val chapters = mutableListOf<ChapterData>()
+        for ((i, el) in chapterLinks.withIndex()) {
+            val chapterUrl = el.attr("href") // Already absolute URL
+            val chapterName = el.selectFirst("strong.styles_chapter_name__lQv69 > span")
+                ?.text()?.trim() ?: "Chapter ${i + 1}"
+
+            chapters.add(ChapterData(chapterName,chapterUrl))
+        }
+
+        return  chapters
+    }
+
+    suspend fun getRelated(recommendInfo: JSONArray): List<SearchResponse> {
+        val responselist=mutableListOf<SearchResponse>()
+
+        for (i in 0 until recommendInfo.length()) {
+            val book = recommendInfo.optJSONObject(i) ?: continue
+
+            val bookID = book.optString("bookId") ?: continue
+            val link = fixUrlNull("$mainUrl/book/$bookID") ?: continue
+
+            val chapterCount = book.optString("totalChapterNum", "0")
+            val title = book.optString("bookName", "Untitled")
+            val cover =
+                "https://book-pic.webnovel.com/bookcover/$bookID?imageMogr2/thumbnail/180x|imageMogr2/format/webp|imageMogr2/quality/70!"
+
+            responselist.add(newSearchResponse(title, link) {
+                posterUrl = cover
+                totalChapterCount = chapterCount
+            })
+        }
+
+        return  responselist;
+    }
 
 
 
-        return HeadMainPageResponse(apiUrl, collectedResults)
+    override suspend fun loadReviews(url: String, page: Int, data: String?): List<UserReview> {
+        val id = data ?: return emptyList()
+        val realUrl = "$mainUrl/go/pcm/bookReview/get-reviews?_csrfToken=$cachedCsrfToken&bookId=$id&pageIndex=$page&pageSize=20&orderBy=1&novelType=0"
+        val infoRequest = Request.Builder()
+            .url(realUrl)
+            .addHeader("User-Agent", MOBILE_USER_AGENT)
+            .addHeader("Cookie", cachedCookies!!)
+            .build()
+        val client = OkHttpClient()
+        val infoResponse = client.newCall(infoRequest).execute()
+        val infoBody = infoResponse.body?.string() ?: throw ErrorLoadingException("Empty book info")
+
+
+        val reviewInfo=JSONObject(infoBody)
+            .getJSONObject("data")
+            .getJSONArray("bookReviewInfos")
+
+        val Reviewlist=mutableListOf<UserReview>()
+
+        for (i in 0 until reviewInfo.length()) {
+            val review = reviewInfo.getJSONObject(i)
+            val userid = review.optString("userId") ?: continue
+            val usename = review.optString("userName","")
+            val revdate = review.optString("createTimeFormat", "")
+            val avatar = "https://user-pic.webnovel.com/userheadimg/$userid/100.jpg"
+
+            val isSpoiler = review.optString("leakFlag", "0") == "1"
+            val reviewTxt = review.optString("content", "")
+
+            Reviewlist.add( newReview(reviewTxt) {
+                username = usename
+                date = revdate
+                avatarUrl = fixUrlNull(avatar)
+                containsSpoilers = isSpoiler
+            })
+
+        }
+
+        return Reviewlist
+    }
+
+    override suspend fun loadHtml(url: String): String? {
+        val fullUrl = fixUrl(url)
+        Log.d("WebnovelFanficProvider", "Loading Chapter HTML from URL: $fullUrl")
+
+        try {
+            val document = app.get(fullUrl).document
+            val contentElement = document.selectFirst("div.cha-content[data-report-l1='3'] div.cha-words")
+            val content = contentElement?.html()
+
+            if (content != null) {
+                Log.d("WebnovelFanficProvider", "Chapter Content Loaded Successfully")
+                return content
+            } else {
+                Log.e("WebnovelFanficProvider", "Chapter Content NOT FOUND in expected structure")
+            }
+        } catch (e: Exception) {
+            Log.e("WebnovelFanficProvider", "Failed to load chapter HTML: ${e.message}")
+        }
+
+        return null
     }
 
     override suspend fun search(query: String,page: Int): List<SearchResponse> {
-
         ensureCookiesLoaded()
-
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val results = mutableListOf<SearchResponse>()
-        val allResults = mutableListOf<SearchResponse>()
-        var pageIndex = 1
-
-//        while (!isLastPage) {
-//            val nextPage = fetchSearchPage(encodedQuery, pageIndex)
-//            allResults.addAll(nextPage.first)
-//            isLastPage = nextPage.second
-//            pageIndex++
-//        }
-
         val nextPage = fetchSearchPage(encodedQuery, page)
         results.addAll(nextPage.first)
         isLastPage = nextPage.second
         Log.e("WEBNOVEL","Current Page: ${lastLoadedPage}")
         return results
     }
-
     private fun fetchSearchPage(encodedQuery: String, pageIndex: Int,Retry:Boolean=false): Pair<List<SearchResponse>, Boolean> {
         val url = "$mainUrl/go/pcm/search/result?_csrfToken=$cachedCsrfToken&pageIndex=$pageIndex&type=fanfic&keywords=$encodedQuery"
 
@@ -299,118 +496,4 @@ class WebnovelFanficProvider : MainAPI() {
 
     }
 
-
-
-    override suspend fun load(url: String): StreamResponse {
-        isOpeningBook=true
-        ensureCookiesLoaded()
-
-        val bookId = url.substringAfterLast("/")
-
-        // Fetch book info from API
-        val detailUrl = "$mainUrl/go/pcm/book/get-book-detail?_csrfToken=$cachedCsrfToken&bookId=$bookId"
-        val infoRequest = Request.Builder()
-            .url(detailUrl)
-            .addHeader("User-Agent", MOBILE_USER_AGENT)
-            .addHeader("Cookie", cachedCookies!!)
-            .build()
-        Log.d("WebNovel","${detailUrl}")
-
-        val client = OkHttpClient()
-        val infoResponse = client.newCall(infoRequest).execute()
-        val infoBody = infoResponse.body?.string() ?: throw ErrorLoadingException("Empty book info")
-
-        val bookInfo = JSONObject(infoBody)
-            .getJSONObject("data")
-            .getJSONObject("bookInfo")
-
-        val title = bookInfo.optString("bookName", "Untitled")
-        val author = bookInfo.optString("authorName", "Unknown")
-        val description = bookInfo.optString("description", "")
-        val cover = "https://book-pic.webnovel.com/bookcover/$bookId?imageMogr2/thumbnail/180x|imageMogr2/format/webp|imageMogr2/quality/70!"
-        val status = when (bookInfo.optInt("actionStatus", 0)) {
-            30 -> "ongoing"
-            50 -> "completed"
-            else -> "paused"
-        }
-
-        val catalogUrl = "$mainUrl/book/$bookId/catalog"
-        val catalogRequest = Request.Builder()
-            .url(catalogUrl)
-            .addHeader("User-Agent", MOBILE_USER_AGENT)
-            .addHeader("Cookie", cachedCookies!!)
-            .build()
-
-        val catalogResponse = client.newCall(catalogRequest).execute()
-        val catalogHtml = catalogResponse.body?.string() ?: throw ErrorLoadingException("Empty catalog page")
-
-        val doc = org.jsoup.Jsoup.parse(catalogHtml)
-        val chapterLinks = doc.select("a.lh24.db.oh.fs14.clearfix.g_row.pr.pt8.pb8")
-
-        val chapters = mutableListOf<ChapterData>()
-
-        for ((i, el) in chapterLinks.withIndex()) {
-            val chapterUrl = el.attr("href") // Already absolute URL
-            val chapterName = el.selectFirst("strong.styles_chapter_name__lQv69 > span")
-                ?.text()?.trim() ?: "Chapter ${i + 1}"
-
-            chapters.add(ChapterData(chapterName,chapterUrl))
-        }
-
-        return newStreamResponse(title, fixUrl(url), chapters) {
-            this.author = author
-            this.posterUrl = cover
-            this.synopsis = description
-            setStatus(status)
-        }
-    }
-
-    override suspend fun loadHtml(url: String): String? {
-        chapterContentCache[url]?.let {
-            Log.d("WebnovelFanficProvider", "Loaded chapter content from cache for $url")
-            return it
-        }
-
-        val fullUrl = fixUrl(url)
-        Log.d("WebnovelFanficProvider", "Loading Chapter HTML from URL: $fullUrl")
-
-        try {
-            val document = app.get(fullUrl).document
-
-            // Select <div class="cha-content " data-report-l1="3"><div class="cha-words ...">
-            val contentElement = document.selectFirst("div.cha-content[data-report-l1='3'] div.cha-words")
-            val content = contentElement?.html()
-
-            if (content != null) {
-                Log.d("WebnovelFanficProvider", "Chapter Content Loaded Successfully")
-                chapterContentCache[url] = content
-                return content
-            } else {
-                Log.e("WebnovelFanficProvider", "Chapter Content NOT FOUND in expected structure")
-            }
-        } catch (e: Exception) {
-            Log.e("WebnovelFanficProvider", "Failed to load chapter HTML: ${e.message}")
-        }
-
-        return null
-    }
-
-
-
-
-    private fun getCategoryIdFromTag(tag: String): String {
-        return when (tag) {
-            "fanfic-anime-comics" -> "81006"
-            "fanfic-video-games" -> "81005"
-            "fanfic-celebrities" -> "81002"
-            "fanfic-music-bands" -> "81003"
-            "fanfic-movies" -> "81007"
-            "fanfic-book-literature" -> "81001"
-            "fanfic-tv" -> "81008"
-            "fanfic-theater" -> "81004"
-            "fanfic-others" -> "81009"
-            "fanfic" -> "0"
-            else -> "0"
-        }
-    }
 }

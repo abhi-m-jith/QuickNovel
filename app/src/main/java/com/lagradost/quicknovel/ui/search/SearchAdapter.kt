@@ -53,7 +53,6 @@ class SearchAdapter(
                 )
                 setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                 setImage(item.image)
-
                 setOnClickListener {
                     viewModel.load(item)
                 }

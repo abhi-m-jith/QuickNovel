@@ -47,6 +47,7 @@ import com.lagradost.quicknovel.downloader.BookFiles.resetApiLastRequestTime
 import com.lagradost.quicknovel.downloader.BookReader
 import com.lagradost.quicknovel.downloader.BookState
 import com.lagradost.quicknovel.downloader.copy
+import com.lagradost.quicknovel.mvvm.BookHelper.ReplaceText
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.letInner
 import com.lagradost.quicknovel.mvvm.logError
@@ -290,7 +291,7 @@ class QuickBook(val data: QuickStreamData) : AbstractBook() {
                 )
             }
         }
-        val text = file.readText()
+        val text = ReplaceText(file.readText())
         val newline = text.indexOf('\n')
         return text.substring(newline + 1)
     }
@@ -1888,6 +1889,15 @@ class ReadActivityViewModel : ViewModel() {
         false,
         Boolean::class,
         bionicReadingLive
+    )
+
+    val highlightPokemonLive: MutableLiveData<Boolean> = MutableLiveData(null)
+
+    var highlightPokemon by PreferenceDelegateLiveView(
+        EPUB_TEXT_POKEMON,
+        false,
+        Boolean::class,
+        highlightPokemonLive
     )
 
     val isTextSelectableLive: MutableLiveData<Boolean> = MutableLiveData(null)

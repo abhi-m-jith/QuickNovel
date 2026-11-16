@@ -13,6 +13,8 @@ import com.lagradost.cloudstream4.state.DefaultStateContainer
 import com.lagradost.cloudstream4.state.EffectContainer
 import com.lagradost.cloudstream4.state.StateContainer
 import com.lagradost.quicknovel.APIRepository
+import com.lagradost.quicknovel.BaseApplication
+import com.lagradost.quicknovel.BaseApplication.Companion.bookdeletedremovekeys
 import com.lagradost.quicknovel.BaseApplication.Companion.getKey
 import com.lagradost.quicknovel.BaseApplication.Companion.removeKey
 import com.lagradost.quicknovel.BaseApplication.Companion.setKey
@@ -22,6 +24,7 @@ import com.lagradost.quicknovel.EPUB_CURRENT_POSITION
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_CHAPTER
 import com.lagradost.quicknovel.EPUB_CURRENT_POSITION_SCROLL_CHAR
 import com.lagradost.quicknovel.EPUB_CURRENT_VISUAL_POSITION
+import com.lagradost.quicknovel.LibraryHelper.setLibraryBooks
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.RESULT_BOOKMARK
 import com.lagradost.quicknovel.RESULT_BOOKMARK_STATE
@@ -34,6 +37,7 @@ import com.lagradost.quicknovel.downloader.BookReader
 import com.lagradost.quicknovel.downloader.BookReader.streamReadChapters
 import com.lagradost.quicknovel.downloader.BookState
 import com.lagradost.quicknovel.downloader.BookStateChanged
+import com.lagradost.quicknovel.mvvm.BookHelper
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.ui.ReadType
 import com.lagradost.quicknovel.ui.common.ChapterFilterMethodType
@@ -215,8 +219,7 @@ class ResultViewModel2(
 
         fun setBookmark(id: Int, response: ImmutableSearchResponse, type: ReadType) {
             if (ReadType.NONE == type) {
-                removeKey(RESULT_BOOKMARK_STATE, id.toString())
-                removeKey(RESULT_BOOKMARK, id.toString())
+                bookdeletedremovekeys(id.toString())
             } else {
                 setKey(
                     RESULT_BOOKMARK_STATE, id.toString(), type.prefValue
@@ -224,7 +227,12 @@ class ResultViewModel2(
                 setKey(
                     RESULT_BOOKMARK, id.toString(), response.toResultCached(id)
                 )
+                BaseApplication.context?.let {
+                    BookHelper.load(it, id.toString())
+                    it.setLibraryBooks()
+                }
             }
+
             BookDownloader2.bookmarkChanged(id)
         }
     }
