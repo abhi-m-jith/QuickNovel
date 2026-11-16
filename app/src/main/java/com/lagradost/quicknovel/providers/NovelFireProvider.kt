@@ -1,39 +1,46 @@
 package com.lagradost.quicknovel.providers
 
-import android.util.Log
+import android.net.Uri
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.quicknovel.ChapterData
+import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
-import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
-import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.R
+import com.lagradost.quicknovel.Score
 import com.lagradost.quicknovel.SearchResponse
+import com.lagradost.quicknovel.UserReview
 import com.lagradost.quicknovel.fixUrl
 import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newChapterData
+import com.lagradost.quicknovel.newReview
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
 import com.lagradost.quicknovel.setStatus
-import com.lagradost.safefile.TAG
 import org.jsoup.Jsoup
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
-class NovelFireProvider :  MainAPI() {
+object NovelFireProvider : NovelFireAPI()
+
+open class NovelFireAPI : MainAPI() {
     override val name = "NovelFire"
     override val mainUrl = "https://novelfire.net"
     override val iconId = R.drawable.icon_novelfire
-
+    override val rateLimitTime = 500L
+    override val usesCloudFlareKiller = true
     override val hasMainPage = true
-    override val infiniteScroll=true
-
+    override val hasReviews = true
+    //novel phoenix uses novel instead of book
+    open val sectionUrl = "book"
     override val mainCategories = listOf(
         "All" to "status-all",
         "Completed" to "status-completed",
         "Ongoing" to "status-ongoing"
     )
     override val orderBys =
-        listOf("New" to "sort-new", "Popular" to "sort-popular", "Updates" to "sort-latest-release")
+        listOf("Popular" to "sort-popular", "New" to "sort-new", "Updates" to "sort-latest-release")
 
     override val tags = listOf(
         "All" to "all",
@@ -95,239 +102,242 @@ class NovelFireProvider :  MainAPI() {
         "Yuri" to "yuri"
     )
 
-    var lastLoadedPage=1
-    val minBooksNeeded=11
-    val maxPagesToFetch=10
-
-    val seenUrls = HashSet<String>()
-
-    override fun FABFilterApplied() {
-        lastLoadedPage=1
-        seenUrls.clear()
-    }
-    override fun ResetFiltersandPage() {
-        FABFilterApplied()
-        ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
-    }
-
     override suspend fun loadMainPage(
         page: Int,
         mainCategory: String?,
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        isChapterCountFilterNeeded=true
-        val collectedResults = mutableListOf<SearchResponse>()
-        var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page
-        var pagesFetched = 0 // optional safety cap
-
-        suspend fun fetchPage(p: Int): Pair<List<SearchResponse>, Boolean> {
-            val url = "$mainUrl/genre-${tag}/${orderBy}/${mainCategory}/all-novel?page=$p"
-            val document = app.get(url).document
-            val rawItems = document.select("li.novel-item")
-            val isLast = rawItems.isNotEmpty()
-
-            val filtered_list=rawItems.mapNotNull { select ->
-                val node = select.selectFirst("a[title]") ?: return@mapNotNull null
-                val href = node.attr("href") ?: return@mapNotNull null
-                val title = node.attr("title") ?: node.selectFirst("h4.novel-title")?.text() ?: return@mapNotNull null
-
-                val chapterText = select.selectFirst(".novel-stats")?.ownText() ?: ""
-                val chapterCount = Regex("""\d+""").find(chapterText)?.value
-
-                // Apply filter
-                if (!LibraryHelper.isChapterCountInRange(ChapterFilter, chapterCount.toString())) {
-                    return@mapNotNull null
-                }
-
-                // Skip duplicates across loads
-                if (!seenUrls.add(href)) {
-                    return@mapNotNull null
-                }
-
-                newSearchResponse(
-                    name = title,
-                    url = href
-                ) {
-                    posterUrl = fixUrlNull(
-                        select.selectFirst("img")?.attr("data-src")
-                            ?: select.selectFirst("img")?.attr("src")
-                    )
-                    totalChapterCount = chapterCount
-                }
-            }
-
-
-            lastLoadedPage = p
-            return Pair(filtered_list, isLast)
-        }
-
-
-
-
-        // Keep fetching until we have enough or reach a reasonable limit
-        while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
-            val (pageResults, hadRawItems) = fetchPage(currentPage)
-
-            // If there were no raw items on this page, it's the end — break
-            if (!hadRawItems) break
-
-            // Add whatever passed the filters (could be empty) and continue to next page if needed
-            if (pageResults.isNotEmpty()) {
-                collectedResults.addAll(pageResults)
-            }
-
-            // Prepare for next iteration
-            currentPage++
-            pagesFetched++
-        }
-        //Log.d("NOVELFIRE","${collectedResults.size}")
-
-        val url = "$mainUrl/genre-${tag}/${orderBy}/${mainCategory}/all-novel?page=${lastLoadedPage}"
-
-        return HeadMainPageResponse(url,collectedResults)
-
-
-    }
-
-    override suspend fun load(url: String): LoadResponse {
-        isOpeningBook=true
+        val url = "$mainUrl/genre-${tag}/${orderBy}/${mainCategory}/all-novel?page=$page"
         val document = app.get(url).document
 
-        // Extract title
-        val title = document.selectFirst("h1.novel-title")?.text() ?: ""
+        val returnValue = document.select("li.novel-item").mapNotNull { select ->
+            val node = select.selectFirst("a[title]") ?: return@mapNotNull null
+            val href = node.attr("href")
+            val title =
+                node.attr("title").takeIf { !it.isEmpty() } ?: node.selectFirst("h4.novel-title")
+                    ?.text() ?: return@mapNotNull null
 
-        // Extract author
-        val author = document.selectFirst("div.author a[itemprop=author]")?.text() ?: ""
+            newSearchResponse(
+                name = title,
+                url = href
+            ) {
+                posterUrl = fixUrlNull(
+                    select.selectFirst("img")?.attr("data-src")
+                        ?: select.selectFirst("img")?.attr("src")
+                )
+            }
 
-        // Extract description/synopsis
-        val synopsis = document.selectFirst("meta[itemprop=description]")?.attr("content") ?: ""
+        }
+        return HeadMainPageResponse(url, returnValue)
+    }
 
-        // Extract book ID from URL to construct image URL
-        val bookId = url.substringAfterLast("/book/").substringBefore("?").substringBefore("/")
-        val constructedPosterUrl = "https://novelfire.net/server-1/$bookId.jpg"
 
-        val chapters = mutableListOf<ChapterData>()
+    override suspend fun load(url: String): LoadResponse {
+        val document = app.get(url).document
+        val infoDiv = document.select("div.novel-info")
 
-        var currentPage = 1
-        var fetchedAll = false
+        val title = infoDiv.selectFirst("h1.novel-title")?.text()
+            ?: throw ErrorLoadingException("Title not found")
+        val id = document.selectFirst("a#novel-report")?.attr("report-post_id")
+            ?: throw ErrorLoadingException("Id not found")
+        val chapters = getChapters(url, id)
 
-        while (!fetchedAll) {
-            val chaptersPageUrl = "$mainUrl/book/$bookId/chapters?page=$currentPage"
+        return newStreamResponse(title, fixUrl(url), chapters) {
+            this.author = infoDiv.selectFirst("div.author > a")?.text()
+            this.posterUrl = fixUrlNull(document.selectFirst("figure.cover img")?.attr("src"))
+            this.synopsis =
+                document.selectFirst("meta[itemprop=description]")?.attr("content")
+                    ?: document.selectFirst("div.summary > div")?.html() ?: ""
 
-            // Get the raw HTML response
-            val response = app.get(chaptersPageUrl)
-            val html = response.text
-            val document = Jsoup.parse(html)
+            this.tags = infoDiv.select("div.categories ul li").mapNotNull {
+                it.text().trim().takeIf { text -> text.isNotEmpty() }
+            }
 
-            // Select all chapter <li> elements
-            val chapterElements = document.select("ul.chapter-list > li")
-
-            if (chapterElements.isEmpty()) {
-                fetchedAll = true
-            } else {
-                val pageChapters = chapterElements.mapNotNull { li ->
-                    val aTag = li.selectFirst("a") ?: return@mapNotNull null
-                    val title = aTag.attr("title")?.trim() ?: return@mapNotNull null
-                    val url = aTag.attr("href")?.trim() ?: return@mapNotNull null
-
-                    newChapterData(title, fixUrl(url))
-                }
-
-                chapters.addAll(pageChapters)
-
-                // Check if there is a "next" page button
-                val hasNext = document.selectFirst("li.page-item > a[rel=next]") != null
-                if (hasNext) {
-                    currentPage++
-                } else {
-                    fetchedAll = true
+            infoDiv.select("div.header-stats span").forEach { span ->
+                if (span.text().contains("Status")) {
+                    setStatus(span.selectFirst("strong")?.text())
+                } else if (span.text().contains("Views")) {
+                    this.views = span.selectFirst("strong")?.ownText()?.trim()?.let {
+                        if (it.contains("k", true)) it.replace("k", "", true).toFloatOrNull()
+                            ?.times(1000)?.roundToInt()
+                        else if (it.contains("m", true)) it.replace("m", "", true).toFloatOrNull()
+                            ?.times(1000000)?.roundToInt()
+                        else it.toIntOrNull()
+                    }
                 }
             }
+
+            this.peopleVoted =
+                document.selectFirst("div.novel-body.container a.grdbtn.reviews-latest-container p.latest.text1row")
+                    ?.text()
+                    ?.replace(Regex("[^0-9]"), "")
+                    ?.trim()
+                    ?.toIntOrNull() ?: 0
+            score = Score.from5(document.selectFirst("div.rating strong.nub")?.text())
+            related = getRelated(id)
+            reviewData = id
+        }
+    }
+
+    open suspend fun getChapters(url: String, id: String): List<ChapterData> {
+        val bookSlug = url.trimEnd('/').substringAfterLast("/")
+        val ajaxUrl = "$mainUrl/ajax/listChapterDataAjax"
+        val response = app.get(
+            ajaxUrl, params = mapOf(
+                "draw" to "1",
+                "columns[0][data]" to "n_sort",
+                "columns[0][name]" to "cmm_posts_detail.n_sort",
+                "columns[0][searchable]" to "true",
+                "columns[0][orderable]" to "true",
+                "columns[0][search][value]" to "",
+                "columns[0][search][regex]" to "false",
+                "columns[1][data]" to "bookmark_created_at",
+                "columns[1][name]" to "bookmark_chapters.created_at",
+                "columns[1][searchable]" to "false",
+                "columns[1][orderable]" to "true",
+                "columns[1][search][value]" to "",
+                "columns[1][search][regex]" to "false",
+                "order[0][column]" to "0",
+                "order[0][dir]" to "asc",
+                "order[0][name]" to "cmm_posts_detail.n_sort",
+                "start" to "0",
+                "length" to "-1",
+                "search[value]" to "",
+                "search[regex]" to "false",
+                "post_id" to id,
+                "only_bookmark" to "false"
+            )
+        ).parsed<AjaxChapterRoot>()
+
+        return response.data?.mapNotNull { item ->
+            val nSort = item.nSort ?: return@mapNotNull null
+
+            val rawTitle = "Ch $nSort. ${item.title}"
+            val chapterUrl = "$mainUrl/$sectionUrl/$bookSlug/chapter-$nSort"
+            newChapterData(rawTitle, chapterUrl) {
+                this.dateOfRelease = item.createdAt
+            }
+        } ?: emptyList()
+    }
+
+    suspend fun getRelated(id: String): List<SearchResponse> {
+        val url = "$mainUrl/ajax/novelYouMayLike?post_id=$id"
+        val document = app.get(url).parsed<RelatedResponse>()
+        return Jsoup.parse(document.html).select("li.novel-item").mapNotNull { element ->
+            val href = element.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+            val title = element.selectFirst("h5")?.text() ?: return@mapNotNull null
+            newSearchResponse(
+                name = title,
+                url = href
+            ) {
+                posterUrl = fixUrlNull(
+                    element.selectFirst("img")?.attr("data-src")
+                        ?: element.selectFirst("img")?.attr("src")
+                )
+            }
+        }
+    }
+
+
+    companion object {
+        /** Dirty, but otherwise we have to update the mainapi too much */
+        private val reviewCursor: ConcurrentHashMap<Pair<String, Int>, String> = ConcurrentHashMap()
+    }
+
+    override suspend fun loadReviews(url: String, page: Int, data: String?): List<UserReview> {
+        val id = data ?: return emptyList()
+        val cursor = if (page == 1) {
+            ""
+        } else {
+            reviewCursor[id to page] ?: return emptyList()
         }
 
+        val realUrl = "$mainUrl/comment/show?post_id=$id&chapter_id=&order_by=newest&cursor=$cursor"
+        val res = app.get(realUrl).parsed<PostsResponse>()
 
+        if (res.nextCursor.isNotBlank())
+            reviewCursor[id to (page + 1)] = res.nextCursor
 
-        return newStreamResponse(title,fixUrl(url), chapters) {
-            this.author = author
-            this.posterUrl = fixUrlNull(constructedPosterUrl)
-            this.synopsis = synopsis
+        val reviews = Jsoup.parse(res.html).select("li:has(.comment-item)")
+
+        return reviews.mapNotNull { r ->
+            val header = r.selectFirst("div.comment-header")
+            val body = r.selectFirst("div.comment-body")
+
+            val reviewContent = body?.selectFirst(".comment-text")
+            val isSpoiler = reviewContent?.attr("data-spoiler") == "1"
+            val reviewTxt = reviewContent?.html()
+
+            newReview(reviewTxt ?: return@mapNotNull null) {
+                username = header?.selectFirst(".username")?.text()
+                date = header?.selectFirst(".post-date")?.text() // Ej: "11h", "1d"
+                avatarUrl = fixUrlNull(header?.selectFirst("img.avatar")?.attr("src"))
+                containsSpoilers = isSpoiler
+            }
         }
+    }
+
+    fun normalize(text: String): String {
+        return text
+            .lowercase()
+            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+            .replace(Regex("[^a-z0-9]"), "")
     }
 
     override suspend fun loadHtml(url: String): String? {
-        val fullUrl = fixUrl(url)
-        Log.d("NovelFireProvider", "Loading Chapter HTML from URL: $fullUrl")
-
-        return try {
-            val document = app.get(fullUrl).document
-            val contentElement = document.selectFirst("div#content")
-            contentElement?.select("img[src*=disable-blocker.jpg]")?.forEach { it.remove() }
-
-            val content = contentElement?.html()
-            if (content != null) {
-                Log.d("NovelFireProvider", "Chapter Content Loaded Successfully")
-                content
-            } else {
-                Log.e("NovelFireProvider", "Chapter Content NOT FOUND")
-                null
+        val document = app.get(url).document
+        var title = document.selectFirst("span.chapter-title")?.text() ?: ""
+        val contentElement = document.selectFirst("div#content")?.apply {
+            selectFirst("p")?.let { p ->
+                if (normalize(p.text()) == normalize(title)) title = ""
             }
-        } catch (e: Exception) {
-            Log.e("NovelFireProvider", "Failed to load chapter HTML: ${e.message}")
-            null
-        }
+            select("img[src*=disable-blocker.jpg]").forEach { it.remove() }
+        } ?: return null
+
+        return if (title.isEmpty())
+            contentElement.html()
+        else
+            "<p>$title</p><br>${contentElement.html()}"
     }
 
-    override suspend fun search(query: String,page: Int): List<SearchResponse> {
-
-
-        var currentPage = page
-        var fetchedAll = false
-        val results = mutableListOf<SearchResponse>()
-        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-
-        val url = "$mainUrl/search/?keyword=$encodedQuery&page=$currentPage"
+    override suspend fun search(query: String): List<SearchResponse> {
+        val url = "$mainUrl/search/?keyword=${Uri.encode(query.trim()).replace("%20", "+")}&page=1"
         val document = app.get(url).document
 
-        val searchList = document.select("ul.novel-list.horizontal.col2.chapters").firstOrNull()
-        val novels = searchList?.select("li.novel-item") ?: emptyList()
-
-        val isLastPageReached = document.selectFirst("ul.pagination li.page-item.disabled[aria-label^='Next']") != null
-
-        if (isLastPageReached) {
-            fetchedAll = true
-            isLastPage=true
-        }
-
-        for (element in novels) {
-            val anchor = element.selectFirst("a") ?: continue
-            val title = anchor.attr("title").trim()
-            val novelUrl = mainUrl+anchor.attr("href")
-            val coverUrl = mainUrl+anchor.selectFirst("img")?.attr("src") ?: ""
-
-            //Log.d(TAG,"$novelUrl    ${anchor.selectFirst("img")?.attr("src")}");
-
-            // Extract chapter count
-            val chapterStat = anchor.select("div.novel-stats").firstOrNull { stat ->
-                stat.selectFirst("i.icon-book-open") != null
-            }
-            val chapterText = chapterStat?.text()?.trim() ?: ""
-            val chapterCount = Regex("(\\d+)").find(chapterText)?.value
-
-            results.add(
-                newSearchResponse(title,fixUrl(novelUrl)){
-                    posterUrl=coverUrl
-                    totalChapterCount=chapterCount
+        return document.select("ul.novel-list.horizontal.col2.chapters li.novel-item")
+            .mapNotNull { element ->
+                val a = element.selectFirst("a") ?: return@mapNotNull null
+                val title = a.attr("title").trim()
+                val novelUrl = a.attr("href")
+                val coverUrl = fixUrlNull(a.selectFirst("img")?.attr("src"))
+                newSearchResponse(title, novelUrl) {
+                    posterUrl = coverUrl
                 }
-            )
-        }
-
-
-
-        return results
-
-
+            }
     }
 
+    data class RelatedResponse(
+        @JsonProperty("html")
+        val html: String
+    )
 
+    data class PostsResponse(
+        @JsonProperty("has_more_pages")
+        val hasMore: Boolean,
+        @JsonProperty("html")
+        val html: String,
+        @JsonProperty("next_cursor")
+        val nextCursor: String,
+    )
+
+    data class AjaxChapterRoot(
+        @JsonProperty("data") val data: List<AjaxChapterItem>? = null
+    )
+
+    data class AjaxChapterItem(
+        @JsonProperty("n_sort") val nSort: Int? = null,
+        @JsonProperty("title") val title: String? = null,
+        @JsonProperty("bookmark_created_at") val createdAt: String? = null
+    )
 }

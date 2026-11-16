@@ -11,7 +11,6 @@ import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.map
 import com.lagradost.quicknovel.util.Apis
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class MainPageViewModel : ViewModel() {
@@ -24,14 +23,13 @@ class MainPageViewModel : ViewModel() {
     }*/
 
     private val infCards: ArrayList<SearchResponse> = arrayListOf()
-    private val infSearchCards: ArrayList<SearchResponse> = arrayListOf()
     private var oldResponse: Resource<SearchResponseList>? = null
-    private var searchResponseListQueries : Int = 0
+    private var searchResponseListQueries: Int = 0
 
     data class SearchResponseList(
         val items: List<SearchResponse>,
         val pages: Int,
-        val id : Int,
+        val id: Int,
     )
 
     val currentCards: MutableLiveData<Resource<SearchResponseList>> by lazy {
@@ -49,9 +47,6 @@ class MainPageViewModel : ViewModel() {
         MutableLiveData<Int>(null)
     }
     val currentTag: MutableLiveData<Int> by lazy {
-        MutableLiveData<Int>(null)
-    }
-    val currentChapterCountFilter: MutableLiveData<Int> by lazy {
         MutableLiveData<Int>(null)
     }
 
@@ -80,25 +75,10 @@ class MainPageViewModel : ViewModel() {
         }
     }
 
-    public var currentSearchQuery: String? = null
-    public var searchPage = 0
-    public var isLoadingSearch = false
-    public var hasQueryInput=false
-
-    fun ResetVales()
-    {
-        infSearchCards.clear()
-        hasQueryInput=false
-        currentSearchQuery=""
-        searchPage=0
-        api.api.isLastPage=false
-    }
-
     fun search(query: String) {
         if (isInSearch.value == false) {
             oldResponse = currentCards.value
         }
-
 
         // searchCards.postValue(ArrayList())
         currentCards.postValue(Resource.Loading())
@@ -106,77 +86,14 @@ class MainPageViewModel : ViewModel() {
         isInSearch.postValue(true)
         viewModelScope.launch {
             val res = repo.search(query)
-            currentCards.postValue(res.map { x -> SearchResponseList(items = x, pages = 1, id = ++searchResponseListQueries) })
+            currentCards.postValue(res.map { x ->
+                SearchResponseList(
+                    items = x,
+                    pages = 1,
+                    id = ++searchResponseListQueries
+                )
+            })
         }
-        android.util.Log.d("SEARCH AREA","${query} ${searchPage} ${infSearchCards.count()}")
-    }
-    fun search(query: String, page: Int) {
-
-        if(api.api.isLastPage)
-        {
-            return
-        }
-        searchPage=page
-        api.api.isSearching=true
-        if (currentSearchQuery != query || page == 1) {
-            infSearchCards.clear()
-            currentSearchQuery = query
-            hasQueryInput=true
-            currentCards.postValue(Resource.Loading())
-        }
-        if (isInSearch.value == false) {
-            oldResponse = currentCards.value
-        }
-
-        currentPage.postValue(searchPage)
-        isInSearch.postValue(true)
-        if (page != 1) {
-            loadingMoreItems.postValue(true)
-        }
-
-        android.util.Log.d("SEARCH AREA","${query} ${searchPage} ${page} ${infSearchCards.count()}")
-
-        viewModelScope.launch {
-
-            when (val res = repo.search(query, searchPage)) {
-                is Resource.Success -> {
-                    val response = res.value
-                    if(!infSearchCards.containsAll(response))
-                    {
-                        infSearchCards.addAll(response)
-                        currentCards.postValue(
-                            Resource.Success(
-                                SearchResponseList(
-                                    infSearchCards,
-                                    searchPage,
-                                    ++searchResponseListQueries
-                                )
-                            )
-                        )
-                    }
-
-                    
-                }
-
-                is Resource.Failure -> {
-                    val result: Resource<SearchResponseList> = Resource.Failure(
-                        res.isNetworkError,
-                        res.errorCode,
-                        res.errorResponse,
-                        res.errorString
-                    )
-                    currentCards.postValue(result)
-                }
-
-                is Resource.Loading -> {
-                    //NOTHING
-                }
-            }
-
-            loadingMoreItems.postValue(false)
-            api.api.isSearching=false
-        }
-
     }
 
     fun switchToMain() {
@@ -212,13 +129,31 @@ class MainPageViewModel : ViewModel() {
         )
     }
 
+    fun setMainCategory(to: Int) {
+        currentMainCategory.postValue(to)
+        load(0, mainCategory = to, orderBy = currentOrderBy.value, tag = currentOrderBy.value)
+    }
+
+    fun setTag(to: Int) {
+        currentTag.postValue(to)
+        load(0, mainCategory = currentMainCategory.value, orderBy = currentOrderBy.value, tag = to)
+    }
+
+    fun setOrderBy(to: Int) {
+        currentOrderBy.postValue(to)
+        load(0, mainCategory = currentMainCategory.value, orderBy = to, tag = currentTag.value)
+    }
+
     fun load(
         page: Int?,
         mainCategory: Int?,
         orderBy: Int?,
         tag: Int?,
-        chapterCountFilter:Int?=null,
     ) {
+        currentTag.postValue(tag)
+        currentOrderBy.postValue(orderBy)
+        currentMainCategory.postValue(mainCategory)
+
         val cPage = page ?: ((currentPage.value ?: 0) + 1)
         if (cPage == 0) {
             infCards.clear()
@@ -250,9 +185,7 @@ class MainPageViewModel : ViewModel() {
 
                 is Resource.Failure -> {
                     val result: Resource<SearchResponseList> = Resource.Failure(
-                        res.isNetworkError,
-                        res.errorCode,
-                        res.errorResponse,
+                        res.cause,
                         res.errorString
                     )
                     currentCards.postValue(result)
@@ -266,10 +199,6 @@ class MainPageViewModel : ViewModel() {
             loadingMoreItems.postValue(false)
 
             currentPage.postValue(cPage)
-            currentTag.postValue(tag)
-            currentOrderBy.postValue(orderBy)
-            currentMainCategory.postValue(mainCategory)
-            currentChapterCountFilter.postValue(chapterCountFilter)
         }
     }
 }

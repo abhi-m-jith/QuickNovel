@@ -48,9 +48,9 @@
 
     <string name="filter_dialog_sort_by">Sırala</string>
     <string name="filter_dialog_filter">Uygula</string>
-    <string name="filter_dialog_general">Genel:</string>
-    <string name="filter_dialog_order_by">Sıralama ölçütü:</string>
-    <string name="filter_dialog_genre">Tür:</string>
+    <string name="filter_dialog_general">Genel</string>
+    <string name="filter_dialog_order_by">Sıralama ölçütü</string>
+    <string name="filter_dialog_genre">Tür</string>
     <string name="browse_list_icon">Simge</string>
     <string name="home_title_text">Keşfet</string>
     <string name="mainpage_filter">Filtre</string>
@@ -61,7 +61,7 @@
     <string name="mainpage_sort_by_button_text">Sırala</string>
     <string name="read_action_settings">Ayarlar</string>
     <string name="read_action_chapters">Bölümler</string>
-    <string name="read_action_chapters_formatted" formatted="true">%d Bölüm</string>
+    <string name="read_action_chapters_formatted" formatted="true">%s Bölüm</string>
 
     <string name="read_action_tts">Metni Seslendirme</string>
     <string name="read_action_screen_rotation">Ekran Döndürme</string>
@@ -145,7 +145,7 @@
     <string name="backup_settings">Verileri yedekle</string>
     <string name="restore_success">Yedek dosyası yüklendi</string>
     <string name="restore_failed_format" formatted="true">%s dosyasından veri geri yüklenemedi</string>
-    <string name="backup_success">Veriler başarıyla kaydedildi</string>
+    <string name="backup_success">Veriler başarıyla kaydedildi %s</string>
     <string name="backup_failed">Depolama izinleri eksik, lütfen tekrar deneyin</string>
     <string name="backup_failed_error_format">%s yedeklenirken hata oluştu</string>
     <string name="tts_locale">Dil</string>

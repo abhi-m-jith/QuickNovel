@@ -1,0 +1,71 @@
+package com.lagradost.quicknovel.providers
+
+import com.lagradost.quicknovel.ChapterData
+import com.lagradost.quicknovel.LoadResponse
+import com.lagradost.quicknovel.Score
+import com.lagradost.quicknovel.fixUrlNull
+import com.lagradost.quicknovel.newChapterData
+import com.lagradost.quicknovel.newStreamResponse
+import com.lagradost.quicknovel.setStatus
+import org.jsoup.nodes.Document
+
+object NovLoveProvider : MeioNovelAPI() {
+    override val name = "NovLove"
+    override val mainUrl = "https://novelnice.com"
+    override val hasMainPage = false
+    override val lang = "en"
+
+    override suspend fun load(url: String): LoadResponse? {
+        //This is for migrating NovLove URLs.
+        val path = url.substringAfter("://").substringAfter("/", "")
+        val adaptedPath = path.replaceFirst("novel/", "read/")
+        val finalUrl = "${mainUrl}/$adaptedPath".removeSuffix("/")
+        val document = app.get(finalUrl).document
+        val name = document.selectFirst("div.post-title > h1")?.text()?.clean() ?: return null
+
+        return newStreamResponse(name, url, getChaptersNovLove(document, url)) {
+            tags = document.select("div.genres-content > a").map { it.text() }
+            author = document.selectFirst("div.author-content > a")?.text()
+
+            synopsis =
+                document.select("#editdescription > p, div.j_synopsis > p, div.summary__content > p")
+                    .filter { it.hasText() && !it.text().lowercase().contains(mainUrl) }
+                    .joinToString("\n\n") { it.text() }
+
+            setStatus(
+                document.select("div.post-status > div.post-content_item > div.summary-content")
+                    .last()?.text()
+            )
+
+            posterUrl = fixUrlNull(document.selectFirst("div.summary_image > a > img")?.let {
+                it.attr("data-src").takeIf { src -> src.isNotBlank() } ?: it.attr("src")
+            })
+
+            score = Score.from5(document.selectFirst("span#averagerate")?.text())
+            peopleVoted = document.selectFirst("span#countrate")?.text()?.let { text ->
+                text.replace("K", if (text.contains(".")) "00" else "000")
+                    .replace(".", "").toIntOrNull()
+            } ?: 0
+
+            related = getRelated(document)
+        }
+    }
+
+    suspend fun getChaptersNovLove(document: Document, url: String): List<ChapterData> {
+        val slug = url.removeSuffix("/").substringAfterLast("/")
+        val range = document.select("div.post-content > div")
+            .first { it.selectFirst("h5")?.text()?.trim() == "Chapters" }
+            .selectFirst("div.summary-content")
+            ?.text()
+            ?.trim()
+            ?.toIntOrNull() ?: return emptyList()
+        return if (range <= 200) {//batch of 200 chapters
+            getChapters(url)
+        } else (1..range).mapNotNull { c ->
+            newChapterData(
+                name = "Chapter $c",
+                url = "$mainUrl/read/$slug/chapter-$c",
+            )
+        }
+    }
+}

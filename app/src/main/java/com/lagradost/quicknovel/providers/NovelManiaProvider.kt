@@ -1,0 +1,195 @@
+package com.lagradost.quicknovel.providers
+
+import android.net.Uri
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.lagradost.quicknovel.*
+import com.lagradost.quicknovel.util.AppUtils.parseJson
+import kotlin.collections.mapNotNull
+
+object NovelManiaProvider : MainAPI() {
+    override val name = "Novelmania"
+    override val mainUrl = "https://novelmania.com.br"
+    override val iconId = R.drawable.icon_novelmaina
+    override val iconBackgroundId = R.color.white
+    override val lang = "pt-pt"
+    override val hasMainPage = true
+
+    override suspend fun loadMainPage(
+        page: Int,
+        mainCategory: String?,
+        orderBy: String?,
+        tag: String?
+    ): HeadMainPageResponse {
+        val url = "$mainUrl/api/novels?sort=title_asc&page=$page&items=24"
+        val document = app.get(url).parsed<SearchResponseNovelMania>()
+
+        val items = document.data.mapNotNull { card ->
+            val title = card.title ?: return@mapNotNull null
+            return@mapNotNull newSearchResponse(title, "$mainUrl/novels/${card.slug}") {
+                posterUrl = card.cover?.large
+            }
+        }
+
+        return HeadMainPageResponse(url, items)
+    }
+
+    private suspend fun getChapters(url: String): List<ChapterData> {
+        //get /novels/slug
+        val relativePath = url.removePrefix(mainUrl).substringBefore("?source").removeSuffix("/")
+        val apiChaptersUrl = "$mainUrl/api${relativePath}/chapters?page=1&items=50&sort=asc"
+
+        val response = app.get(apiChaptersUrl).parsed<ChaptersResponse>()
+        val totalChapters = response.meta.count
+
+        //exist pagination
+        if (totalChapters > 50) {
+            return (0 until totalChapters).map {
+                newChapterData("Capítulo ${it + 1}", "$relativePath-------$it")
+            }
+        }
+
+        return response.data.map {
+            val title = if (it.longTitle.isNotBlank()) "${it.longTitle} - ${it.title}" else it.title
+            newChapterData(title, "$mainUrl${relativePath}/capitulos/${it.slug}")
+        }
+    }
+
+    override suspend fun load(url: String): LoadResponse? {
+        val document = app.get(url).document
+        //contains novel info
+        val scriptContent = document.select("script[type=application/ld+json]")
+            .firstOrNull { it.html().contains("\"@type\":\"Book\"") }
+            ?.html() ?: return null
+
+        val bookInfo = parseJson<NovelResponse>(scriptContent)
+        val chapters = getChapters(url)
+
+        return newStreamResponse(bookInfo.name, url, chapters) {
+            this.posterUrl = bookInfo.image
+            this.synopsis = bookInfo.description
+            this.author = bookInfo.author?.name
+            this.tags = bookInfo.genre
+        }
+    }
+
+    /**
+     * Returns the page containing the requested chapter and its index within that page.
+     *
+     * Requirements:
+     * 1. Pagination must be in ascending order.
+     * 2. The absolute Chapter Index must be provided (start at 0).
+     * 3. The number of items per page must be provided.
+     */
+    private fun getPaginationPositionAndRelativeIndexAscendant(chapterBigIndex: Int, itemsPerPage: Int): Pair<Int, Int> {
+        val page = (chapterBigIndex / itemsPerPage) + 1
+        val index = chapterBigIndex % itemsPerPage
+        return page to index
+    }
+
+    override suspend fun loadHtml(url: String): String? {
+        val isPrediction = url.contains("-------")
+
+        val document = if (isPrediction) {
+            val chapterData = url.split("-------")
+            val relativePath = chapterData[0]
+            val absoluteChapterNumber = chapterData[1].toInt()
+            val itemsPerPage = 50
+
+            val (page, index) = getPaginationPositionAndRelativeIndexAscendant(absoluteChapterNumber, itemsPerPage)
+
+            val apiRequestUrl = "${relativePath.replace("/novels/", "/api/novels/")}/chapters?page=$page&items=$itemsPerPage&sort=asc"
+            val response = app.get(apiRequestUrl).parsed<ChaptersResponse>()
+
+            val chapterSlug = response.data.getOrNull(index)?.slug ?: return null
+            val realChapterUrl = "${relativePath}/capitulos/$chapterSlug"
+            app.get(realChapterUrl).document
+        } else {
+            app.get(url).document
+        }
+
+        val scriptContent = document.select("script").firstOrNull {
+            it.data().contains("\$_TSR.router") && it.data().contains("content:")
+        }?.data() ?: return null
+
+        val contentRegex = Regex("""content:\s*"(.*?[^\\])"""")
+        val match = contentRegex.find(scriptContent)
+        val rawContent = match?.groupValues?.get(1) ?: return null
+
+        return decodeJSString(rawContent)
+    }
+
+    /**
+     * Decodes JavaScript escape sequences from a string.
+     * 1. Hexadecimal escapes (\xHH): e.g., \x3C -> <
+     * 2. Unicode escapes (\uHHHH): e.g., \u0026 -> &
+     * 3. Control/Special characters: e.g., \" -> ", \n -> newline, \\ -> \
+     */
+    //This function was generated by Android Studio Gemini
+    private fun decodeJSString(input: String): String {
+        var text = input
+
+        val hexRegex = Regex("""\\x([0-9a-fA-F]{2})""")
+        text = hexRegex.replace(text) {
+            it.groupValues[1].toInt(16).toChar().toString()
+        }
+
+        val unicodeRegex = Regex("""\\u([0-9a-fA-F]{4})""")
+        text = unicodeRegex.replace(text) {
+            it.groupValues[1].toInt(16).toChar().toString()
+        }
+
+        return text
+            .replace("\\\"", "\"")
+            .replace("\\n", "\n")
+            .replace("\\r", "")
+            .replace("\\\\", "\\")
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val url = "$mainUrl/api/novels?q=${Uri.encode(query)}&sort=popularity&limit=8"
+        val document = app.get(url).parsed<SearchResponseNovelMania>()
+
+        return document.data.mapNotNull { card ->
+            val title = card.title ?: return@mapNotNull null
+            return@mapNotNull newSearchResponse(title, "$mainUrl/novels/${card.slug}") {
+                posterUrl = card.cover?.large
+            }
+        }
+    }
+    data class NovelResponse(
+        @JsonProperty("name") val name: String,
+        @JsonProperty("description") val description: String?,
+        @JsonProperty("url") val url: String,
+        @JsonProperty("image") val image: String?,
+        @JsonProperty("author") val author: Author?,
+        @JsonProperty("genre") val genre: List<String>?
+    )
+
+    data class Author(@JsonProperty("name") val name: String)
+
+    data class ChaptersResponse(
+        @JsonProperty("data") val data: List<Chapter>,
+        @JsonProperty("meta") val meta: Meta,
+    )
+
+    data class Meta(@JsonProperty("count") val count: Int)
+
+    data class Chapter(
+        @JsonProperty("slug") val slug: String,
+        @JsonProperty("longTitle") val longTitle: String = "",
+        @JsonProperty("title") val title: String = ""
+    )
+
+
+    data class SearchResponseNovelMania(
+        @JsonProperty("data") val data: List<Novel>,
+    )
+    data class Novel(
+        @JsonProperty("cover") val cover: TypeImage?,
+        @JsonProperty("slug") val slug: String?,
+        @JsonProperty("title") val title: String?
+    )
+    data class TypeImage(
+        @JsonProperty("large") val large:String
+    )
+}

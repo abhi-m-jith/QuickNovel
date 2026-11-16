@@ -1,12 +1,10 @@
 package com.lagradost.quicknovel.providers
 
-import android.util.Log
+
 import com.lagradost.quicknovel.ChapterData
 import com.lagradost.quicknovel.HeadMainPageResponse
-import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
-import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.fixUrl
@@ -15,14 +13,17 @@ import com.lagradost.quicknovel.newChapterData
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
 import com.lagradost.quicknovel.setStatus
+import org.jsoup.nodes.Document
 
-open class WuxiaBoxProvider :  MainAPI() {
+object WuxiaBoxProvider : WuxiaBoxAPI()
+
+open class WuxiaBoxAPI : MainAPI() {
     override val name = "WuxiaBox"
     override val mainUrl = "https://www.wuxiabox.com"
     override val iconId = R.drawable.icon_wuxiabox
+    override val usesCloudFlareKiller = true
 
     override val hasMainPage = true
-    override val infiniteScroll=true
 
     override val mainCategories = listOf(
         "All" to "all",
@@ -91,111 +92,58 @@ open class WuxiaBoxProvider :  MainAPI() {
 
     override val orderBys = listOf("New" to "newstime", "Popular" to "onclick", "Updates" to "lastdotime")
 
-    var lastLoadedPage=0
-    val minBooksNeeded=11
-    val maxPagesToFetch=10
-
-    val seenUrls = HashSet<String>()
-
-    override fun FABFilterApplied() {
-        lastLoadedPage=0
-        seenUrls.clear()
-    }
-    override fun ResetFiltersandPage() {
-        FABFilterApplied()
-        ChapterFilter=LibraryHelper.ChapterCountFilter.ALL
-    }
 
     override suspend fun loadMainPage(
         page: Int,
         mainCategory: String?,
         orderBy: String?,
         tag: String?
-    ): HeadMainPageResponse {
-        var pp=page
-        if(pp>0){
-            pp--
-        }
-        isChapterCountFilterNeeded=true
-        val collectedResults = mutableListOf<SearchResponse>()
-        var currentPage = if (pp <= lastLoadedPage) lastLoadedPage else pp
-        var pagesFetched = 0 // optional safety cap
+    ): HeadMainPageResponse
+    {
+        val url = "$mainUrl/list/${tag}/${mainCategory}-${orderBy}-${page}.html"
+        val document = app.get(url, timeout = 60).document
 
-        suspend fun fetchPage(p: Int): Pair<List<SearchResponse>, Boolean> {
-            val url = "$mainUrl/list/${tag}/${mainCategory}-${orderBy}-${p}.html"
-            val document = app.get(url, timeout = 60).document
-            val rawItems = document.select("li.novel-item")
-            val isLast = rawItems.isNotEmpty()
+        val returnValue = document.select("li.novel-item").mapNotNull { select ->
 
-            val filtered_list=rawItems.mapNotNull { select ->
-                val node = select.selectFirst("a[title]") ?: return@mapNotNull null
-                val href = node.attr("href") ?: return@mapNotNull null
-                val title = node.attr("title") ?: node.selectFirst("h4.novel-title")?.text() ?: return@mapNotNull null
+            val a = select.selectFirst("a[title]") ?: return@mapNotNull null
+            val title =
+                a.attr("title").takeIf { it.trim().isNotEmpty() }
+                    ?: a.selectFirst("h4.novel-title")
+                        ?.text() ?: return@mapNotNull null
 
-                val chapterText = select.select("div.novel-stats span")
-                    .firstOrNull { it.text().contains("Chapters", true) }
-                    ?.text()
-                    ?: ""
-                val chapterCount = Regex("""\d+""").find(chapterText)?.value
+            val href = a.attr("href")
 
-                val cover = select.selectFirst("img")?.let {
+            newSearchResponse(name = title, href) {
+                posterUrl = fixUrlNull(select.selectFirst("img")?.let {
                     it.attr("data-src").ifBlank { it.attr("src") }
-                }
-
-                // Apply filter
-                if (!LibraryHelper.isChapterCountInRange(ChapterFilter, chapterCount.toString())) {
-                    return@mapNotNull null
-                }
-
-                // Skip duplicates across loads
-                if (!seenUrls.add(href)) {
-                    return@mapNotNull null
-                }
-
-                newSearchResponse(
-                    name = title,
-                    url = href
-                ) {
-                    posterUrl = fixUrlNull(cover)
-                    totalChapterCount=chapterCount
-                }
+                })
             }
-
-
-            lastLoadedPage = p
-            return Pair(filtered_list, isLast)
         }
-
-        // Keep fetching until we have enough or reach a reasonable limit
-        while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
-            val (pageResults, hadRawItems) = fetchPage(currentPage)
-
-            // If there were no raw items on this page, it's the end — break
-            if (!hadRawItems) break
-
-            // Add whatever passed the filters (could be empty) and continue to next page if needed
-            if (pageResults.isNotEmpty()) {
-                collectedResults.addAll(pageResults)
-            }
-
-            // Prepare for next iteration
-            currentPage++
-            pagesFetched++
-        }
-
-        val url = "$mainUrl/list/${tag}/${mainCategory}-${orderBy}-${lastLoadedPage}.html"
-
-
-        return HeadMainPageResponse(url,collectedResults)
+        return HeadMainPageResponse(url, returnValue)
     }
 
-    override suspend fun load(url: String): LoadResponse {
-        isOpeningBook=true
+    private fun getRelated(document: Document): List<SearchResponse> {
+        return document.select("div.section-body > ul.novel-list > li").mapNotNull { element ->
+            val href = element.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+            val title = element.selectFirst("h5")?.text() ?: return@mapNotNull null
+            newSearchResponse(
+                name = title,
+                url = href
+            ) {
+                posterUrl = fixUrlNull(
+                    element.selectFirst("img")?.attr("data-src")
+                )
+            }
+        }
+    }
+
+    override suspend fun load(url: String): LoadResponse?
+    {
         val document = app.get(url).document
 
 
-        val title = document.selectFirst("h1.novel-title")?.text()?.trim() ?: ""
-        val author = document.selectFirst("div.author [itemprop=author]")?.text()?.trim() ?: ""
+        val title = document.selectFirst("h1.novel-title")?.text()?: return null
+        val author = document.selectFirst("div.author [itemprop=author]")?.text()
         val synopsis = document.selectFirst("meta[itemprop=description]")?.attr("content")
             ?: document.selectFirst("div.summary, div.desc, #intro")?.text()
             ?: ""
@@ -203,7 +151,6 @@ open class WuxiaBoxProvider :  MainAPI() {
         val cover = document.selectFirst("div.fixed-img img")?.let {
             it.attr("data-src").ifBlank { it.attr("src") }
         }
-
 
         val status = document.selectFirst("div.header-stats strong:matches(Ongoing|Completed)")?.text()
 
@@ -227,11 +174,7 @@ open class WuxiaBoxProvider :  MainAPI() {
                 val link = li.selectFirst("a") ?: return@mapNotNull null
                 val url = fixUrl(link.attr("href"))
                 val title = link.selectFirst("strong.chapter-title")?.text()?.trim().orEmpty()
-
-                newChapterData(
-                    name = title,
-                    url = url,
-                )
+                newChapterData(name = title, url = url)
             }
 
             chapters.addAll(pageChapters)
@@ -239,49 +182,31 @@ open class WuxiaBoxProvider :  MainAPI() {
         }
 
 
-
-
-
         return newStreamResponse(title,fixUrl(url), chapters) {
             this.author = author
             this.posterUrl = fixUrlNull(cover)
             this.synopsis = synopsis
             setStatus(status)
+            related = getRelated(document)
         }
     }
 
     override suspend fun loadHtml(url: String): String? {
         val fullUrl = fixUrl(url)
-        Log.d("WuxiaBoxProvider", "Loading Chapter HTML from URL: $fullUrl")
+        val document = app.get(fullUrl).document
+        // Select the actual chapter text container
+        val contentElement = document.selectFirst("div.chapter-content")?:return null
 
-        return try {
-            val document = app.get(fullUrl).document
+        // Remove ad placeholders/images
+        contentElement.select("img[src*=disable-blocker.jpg], script, div[align=center]").forEach { it.remove() }
 
-            // Select the actual chapter text container
-            val contentElement = document.selectFirst("div.chapter-content")
-
-            // Remove ad placeholders/images
-            contentElement?.select("img[src*=disable-blocker.jpg], script, div[align=center]")?.forEach { it.remove() }
-
-            // Get the HTML string for display
-            val content = contentElement?.html()
-            if (content != null) {
-                Log.d("WuxiaBoxProvider", "Chapter Content Loaded Successfully")
-                content
-            } else {
-                Log.e("WuxiaBoxProvider", "Chapter Content NOT FOUND")
-                null
-            }
-        } catch (e: Exception) {
-            Log.e("WuxiaBoxProvider", "Failed to load chapter HTML: ${e.message}")
-            null
-        }
+        // Get the HTML string for display
+        return contentElement.html()
     }
 
-    override suspend fun search(query: String,page: Int): List<SearchResponse> {
-
-
-        var currentPage = page-1
+    override suspend fun search(query: String): List<SearchResponse> {
+        var currentPage = 0
+        val results = mutableListOf<SearchResponse>()
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
 
         val response = app.post(
@@ -291,7 +216,8 @@ open class WuxiaBoxProvider :  MainAPI() {
                 "tempid" to "1",
                 "tbname" to "news",
                 "keyboard" to encodedQuery // your search keyword
-            )
+            ),
+            allowRedirects = true
         )
 
         // The server redirects with url result/?searchid=XXXXX
@@ -300,36 +226,33 @@ open class WuxiaBoxProvider :  MainAPI() {
         // Regex to pull out the digits after searchid=
         val searchId = Regex("searchid=(\\d+)").find(redirectValue)?.groupValues?.get(1)
 
-        val url = "$mainUrl/e/search/result/index.php?page=$currentPage&searchid=$searchId"
-        val document = app.get(url, timeout = 60).document
+        while (true) {
+            val url = "$mainUrl/e/search/result/index.php?page=$currentPage&searchid=$searchId"
+            val document = app.get(url, timeout = 60).document
 
-        val isLastPageReached = document.selectFirst("ul.pagination a:matchesOwn(^>$|^>>$)") == null
+            val pageResults = document.select("li.novel-item").mapNotNull { element ->
+                val node = element.selectFirst("a[title]") ?: return@mapNotNull null
+                val href = fixUrl(node.attr("href"))
+                val title = node.attr("title")
+                    .ifBlank { element.selectFirst("h4.novel-title")?.text() }
+                    ?: return@mapNotNull null
 
-        isLastPage=isLastPageReached
+                val cover = element.selectFirst("img")?.let {
+                    it.attr("data-src").ifBlank { it.attr("src") }
+                }
 
-
-        return document.select("li.novel-item").mapNotNull { element ->
-            val node = element.selectFirst("a[title]") ?: return@mapNotNull null
-            val href = fixUrl(node.attr("href"))
-            val title = node.attr("title")
-                .ifBlank { element.selectFirst("h4.novel-title")?.text() }
-                ?: return@mapNotNull null
-
-            val cover = element.selectFirst("img")?.let {
-                it.attr("data-src").ifBlank { it.attr("src") }
+                newSearchResponse(title, href) {
+                    posterUrl = fixUrlNull(cover)
+                }
             }
 
-            val chapterText = element.select("div.novel-stats span")
-                .firstOrNull { it.text().contains("Chapters", true) }
-                ?.text().orEmpty()
-            val chapterCount = Regex("""\d+""").find(chapterText)?.value
+            if (pageResults.isEmpty()) break
 
-            newSearchResponse(title, href) {
-                posterUrl = fixUrlNull(cover)
-                totalChapterCount = chapterCount
-            }
+            results.addAll(pageResults)
+            currentPage++
         }
 
+        return results
 
     }
 

@@ -1,8 +1,17 @@
 package com.lagradost.quicknovel.util
 
+import androidx.compose.runtime.Immutable
+import com.fasterxml.jackson.annotation.JsonProperty
+import com.lagradost.quicknovel.BaseApplication.Companion.getKey
+import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE
+import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE_PDF
+import com.lagradost.quicknovel.EPUB_CURRENT_POSITION
+import com.lagradost.quicknovel.RESULT_BOOKMARK
+import com.lagradost.quicknovel.SlopStatus
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.ui.img
 
+@Immutable
 data class ResultCached(
     val source : String,
     val name: String,
@@ -15,10 +24,23 @@ data class ResultCached(
     val totalChapters : Int,
     val cachedTime : Long, // milliseconds
     val synopsis : String? = null,
+    val posterHeaders : Map<String,String>? = null,
+    @JsonProperty("contentWarnings")
+    val contentWarnings: List<String>?,
+    @JsonProperty("genre")
+    val genre: List<String>?,
+    @JsonProperty("slopStatus")
+    val slopStatus: SlopStatus?,
 ) {
+    val isImported: Boolean get() = (apiName == IMPORT_SOURCE || apiName == IMPORT_SOURCE_PDF)
+
     val image : UiImage? get() = img(poster)
 
     override fun hashCode(): Int {
         return id
     }
+    val currentTotalChapters:Int get() = (
+            getKey(RESULT_BOOKMARK, this.id.toString()) as? ResultCached
+            )?.totalChapters ?: totalChapters
+    val lastChapterRead:Int get() = getKey<Int>(EPUB_CURRENT_POSITION, this.name)?.let{it+1}?:0
 }

@@ -1,14 +1,29 @@
 package com.lagradost.quicknovel.mvvm
 
 import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.core.view.doOnAttach
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.findViewTreeLifecycleOwner
+import androidx.viewbinding.ViewBinding
 import com.lagradost.quicknovel.BuildConfig
 import com.lagradost.quicknovel.ErrorLoadingException
-import kotlinx.coroutines.*
+import com.lagradost.quicknovel.MLException
+import com.lagradost.quicknovel.ui.BaseFragment
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLHandshakeException
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.InvocationKind
+import kotlin.contracts.contract
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -40,44 +55,45 @@ inline fun debugWarning(assert: () -> Boolean, message: () -> String) {
     }
 }
 
-fun <T> LifecycleOwner.observe(liveData: LiveData<T>, action: (t: T) -> Unit) {
+fun <T> ComponentActivity.observe(liveData: LiveData<T>, action: (t: T) -> Unit) {
+    liveData.removeObservers(this)
     liveData.observe(this) { it?.let { t -> action(t) } }
 }
-fun <T> LifecycleOwner.observeNullable(liveData: LiveData<T>, action: (t: T) -> Unit) {
-    liveData.observe(this) { action(it) }
+
+fun <T> ComponentActivity.observeNullable(liveData: LiveData<T>, action: (t: T) -> Unit) {
+    liveData.removeObservers(this)
+    liveData.observe(this, action)
 }
-inline fun <reified T : Any> some(value: T?): Some<T> {
-    return if (value == null) {
-        Some.None
+
+fun <T, V : ViewBinding> BaseFragment<V>.observe(liveData: LiveData<T>, action: (t: T) -> Unit) {
+    observeNullable(liveData) { t -> t?.run(action) }
+}
+
+/**
+ * Attaches an observable to the root binding, instead of the fragment. This is more efficient as
+ * it will not call observe if the view is in the background.
+ * */
+fun <T, V : ViewBinding> BaseFragment<V>.observeNullable(
+    liveData: LiveData<T>, action: (t: T) -> Unit
+) {
+    val root = this.binding?.root
+    if (root == null) {
+        liveData.removeObservers(this)
+        liveData.observe(this, action)
     } else {
-        Some.Success(value)
-    }
-}
-
-sealed class Some<out T> {
-    data class Success<out T>(val value: T) : Some<T>()
-    object None : Some<Nothing>()
-
-    override fun toString(): String {
-        return when (this) {
-            is None -> "None"
-            is Success -> "Some(${value.toString()})"
+        root.doOnAttach { view ->
+            // On attach should make findViewTreeLifecycleOwner non null, but use "this" just in case
+            val owner: LifecycleOwner = view.findViewTreeLifecycleOwner() ?: this@observeNullable
+            liveData.removeObservers(owner)
+            liveData.observe(owner, action)
         }
     }
-}
-
-sealed class ResourceSome<out T> {
-    data class Success<out T>(val value: T) : ResourceSome<T>()
-    object None : ResourceSome<Nothing>()
-    data class Loading(val data: Any? = null) : ResourceSome<Nothing>()
 }
 
 sealed class Resource<out T> {
     data class Success<out T>(val value: T) : Resource<T>()
     data class Failure(
-        val isNetworkError: Boolean,
-        val errorCode: Int?,
-        val errorResponse: Any?, //ResponseBody
+        val cause: Throwable?,
         val errorString: String,
     ) : Resource<Nothing>()
 
@@ -88,8 +104,7 @@ fun logError(throwable: Throwable) {
     Log.d("ApiError", "-------------------------------------------------------------------")
     Log.d("ApiError", "safeApiCall: " + throwable.localizedMessage)
     Log.d("ApiError", "safeApiCall: " + throwable.message)
-    throwable.printStackTrace()
-    /*try {
+    throwable.printStackTrace()/*try {
         showToast(throwable.stackTraceToString(), Toast.LENGTH_LONG)
     } catch (_ : Throwable) {
 
@@ -97,7 +112,11 @@ fun logError(throwable: Throwable) {
     Log.d("ApiError", "-------------------------------------------------------------------")
 }
 
+@OptIn(ExperimentalContracts::class)
 fun <T> safe(apiCall: () -> T): T? {
+    contract {
+        callsInPlace(apiCall, InvocationKind.AT_MOST_ONCE)
+    }
     return try {
         apiCall.invoke()
     } catch (throwable: Throwable) {
@@ -106,7 +125,11 @@ fun <T> safe(apiCall: () -> T): T? {
     }
 }
 
+@OptIn(ExperimentalContracts::class)
 suspend fun <T> safeAsync(apiCall: suspend () -> T): T? {
+    contract {
+        callsInPlace(apiCall, InvocationKind.AT_MOST_ONCE)
+    }
     return try {
         apiCall.invoke()
     } catch (throwable: Throwable) {
@@ -115,23 +138,14 @@ suspend fun <T> safeAsync(apiCall: suspend () -> T): T? {
     }
 }
 
-suspend fun <T> suspendSafeApiCall(apiCall: suspend () -> T): T? {
-    return try {
-        apiCall.invoke()
-    } catch (throwable: Throwable) {
-        logError(throwable)
-        return null
-    }
-}
-
-fun <T> safeFail(throwable: Throwable): Resource<T> {
+fun safeFailMessage(throwable: Throwable): String {
     val stackTraceMsg =
         (throwable.localizedMessage ?: "") + "\n\n" + throwable.stackTrace.joinToString(
             separator = "\n"
         ) {
             "${it.fileName} ${it.lineNumber}"
         }
-    return Resource.Failure(false, null, null, stackTraceMsg)
+    return stackTraceMsg
 }
 
 fun CoroutineScope.launchSafe(
@@ -150,9 +164,9 @@ fun CoroutineScope.launchSafe(
     return this.launch(context, start, obj)
 }
 
-suspend fun <T, V> Resource<T>.map(transform : suspend (T) -> V) : Resource<V> {
-    return when(this) {
-        is Resource.Failure -> Resource.Failure(this.isNetworkError,this.errorCode,this.errorResponse,this.errorString)
+suspend fun <T, V> Resource<T>.map(transform: suspend (T) -> V): Resource<V> {
+    return when (this) {
+        is Resource.Failure -> Resource.Failure(this.cause, this.errorString)
         is Resource.Loading -> Resource.Loading(this.url)
         is Resource.Success -> {
             Resource.Success(transform(this.value))
@@ -160,13 +174,69 @@ suspend fun <T, V> Resource<T>.map(transform : suspend (T) -> V) : Resource<V> {
     }
 }
 
-fun <T, V> Resource<T>?.letInner(transform : (T) -> V) : V? {
-    return when(this) {
+fun <T, V> Resource<T>?.letInner(transform: (T) -> V): V? {
+    return when (this) {
         is Resource.Success -> {
             transform(this.value)
         }
+
         else -> null
     }
+}
+
+
+fun throwableToMessage(throwable: Throwable): String {
+    return when (throwable) {
+        is MLException -> {
+            safeFailMessage(throwable)
+        }
+
+        is NullPointerException -> {
+            for (line in throwable.stackTrace) {
+                if (line?.fileName?.endsWith("provider.kt", ignoreCase = true) == true) {
+                    return "NullPointerException at ${line.fileName} ${line.lineNumber}\nSite might have updated or added Cloudflare/DDOS protection"
+                }
+            }
+            safeFailMessage(throwable)
+        }
+
+        is SocketTimeoutException -> {
+            "Connection Timeout\nPlease try again later."
+        }
+
+        is UnknownHostException, is ConnectException -> {
+            "Cannot connect to server, try again later."
+        }
+
+        is ErrorLoadingException -> {
+            throwable.message ?: "Error loading, try again later."
+        }
+
+        is NotImplementedError -> {
+            "This operation is not implemented."
+        }
+
+        is SSLHandshakeException -> {
+            (throwable.message ?: "SSLHandshakeException") + "\nTry again later."
+        }
+
+        else -> safeFailMessage(throwable)
+    }
+}
+
+
+fun <T> throwableToResource(throwable: Throwable): Resource<T> {
+    when (throwable) {
+        is MLException -> {
+            throwable.cause?.let {
+                return Resource.Failure(throwable, throwableToMessage(it))
+            }
+        }
+
+        else -> {
+        }
+    }
+    return Resource.Failure(throwable, throwableToMessage(throwable))
 }
 
 suspend fun <T> safeApiCall(
@@ -177,52 +247,7 @@ suspend fun <T> safeApiCall(
             Resource.Success(apiCall.invoke())
         } catch (throwable: Throwable) {
             logError(throwable)
-            when (throwable) {
-                is NullPointerException -> {
-                    for (line in throwable.stackTrace) {
-                        if (line?.fileName?.endsWith("provider.kt", ignoreCase = true) == true) {
-                            return@withContext Resource.Failure(
-                                false,
-                                null,
-                                null,
-                                "NullPointerException at ${line.fileName} ${line.lineNumber}\nSite might have updated or added Cloudflare/DDOS protection"
-                            )
-                        }
-                    }
-                    safeFail(throwable)
-                }
-                is SocketTimeoutException -> {
-                    Resource.Failure(
-                        true,
-                        null,
-                        null,
-                        "Connection Timeout\nPlease try again later."
-                    )
-                }
-                is UnknownHostException -> {
-                    Resource.Failure(true, null, null, "Cannot connect to server, try again later.")
-                }
-                is ErrorLoadingException -> {
-                    Resource.Failure(
-                        true,
-                        null,
-                        null,
-                        throwable.message ?: "Error loading, try again later."
-                    )
-                }
-                is NotImplementedError -> {
-                    Resource.Failure(false, null, null, "This operation is not implemented.")
-                }
-                is SSLHandshakeException -> {
-                    Resource.Failure(
-                        true,
-                        null,
-                        null,
-                        (throwable.message ?: "SSLHandshakeException") + "\nTry again later."
-                    )
-                }
-                else -> safeFail(throwable)
-            }
+            throwableToResource(throwable)
         }
     }
 }

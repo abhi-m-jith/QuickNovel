@@ -1,54 +1,15 @@
 package com.lagradost.quicknovel.ui.download
 
-import android.annotation.SuppressLint
-import android.content.Intent
-import android.content.res.Configuration
-import android.graphics.BitmapFactory
-import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageView
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.widget.SearchView
-import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
-import androidx.recyclerview.widget.RecyclerView
-import androidx.viewpager2.widget.ViewPager2
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.tabs.TabLayout
-import com.google.android.material.tabs.TabLayoutMediator
-import com.lagradost.quicknovel.BaseApplication.Companion.getKey
-import com.lagradost.quicknovel.BaseApplication.Companion.setKey
-import com.lagradost.quicknovel.BookDownloader2
-import com.lagradost.quicknovel.BookDownloader2Helper
+import com.lagradost.cloudstream4.BaseComposeFragment
+import com.lagradost.cloudstream4.compose.Screen
 import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE
-import com.lagradost.quicknovel.CommonActivity.activity
-import com.lagradost.quicknovel.DOWNLOAD_NORMAL_SORTING_METHOD
-import com.lagradost.quicknovel.DOWNLOAD_SETTINGS
-import com.lagradost.quicknovel.DOWNLOAD_SORTING_METHOD
+import com.lagradost.quicknovel.BookDownloader2Helper.IMPORT_SOURCE_PDF
 import com.lagradost.quicknovel.DownloadState
-import com.lagradost.quicknovel.R
-import com.lagradost.quicknovel.databinding.FragmentDownloadsBinding
-import com.lagradost.quicknovel.databinding.SortBottomSheetBinding
-import com.lagradost.quicknovel.mvvm.logError
-import com.lagradost.quicknovel.mvvm.observe
-import com.lagradost.quicknovel.mvvm.safe
-import com.lagradost.quicknovel.ui.SortingMethodAdapter
-import com.lagradost.quicknovel.ui.UiImage
-import com.lagradost.quicknovel.ui.img
-import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
-import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
-import com.lagradost.safefile.MimeTypes
-import com.lagradost.safefile.SafeFile
-import kotlinx.coroutines.launch
-import java.io.File
+import com.lagradost.quicknovel.SlopStatus
 
-class DownloadFragment : Fragment() {
-    private lateinit var viewModel: DownloadViewModel
-    lateinit var binding: FragmentDownloadsBinding
 
+class DownloadFragment : BaseComposeFragment(), Screen by DownloadScreen {
     data class DownloadData(
         @JsonProperty("source")
         val source: String,
@@ -69,14 +30,22 @@ class DownloadFragment : Fragment() {
         val synopsis: String?,
         @JsonProperty("tags")
         val tags: List<String>?,
+        @JsonProperty("contentWarnings")
+        val contentWarnings: List<String>?,
+        @JsonProperty("genre")
+        val genre: List<String>?,
+        @JsonProperty("slopStatus")
+        val slopStatus: SlopStatus?,
         @JsonProperty("apiName")
         val apiName: String,
-        /** Unix time ms */
+        /** Unix time ms, downloaded update check */
         @JsonProperty("lastUpdated")
         val lastUpdated: Long?,
-        /** Unix time ms */
+        /** Unix time ms, last chapter downloaded */
         @JsonProperty("lastDownloaded")
         val lastDownloaded: Long?,
+        @JsonProperty("posterHeaders")
+        val posterHeaders: Map<String, String>? = null,
     )
 
     data class DownloadDataLoaded(
@@ -100,54 +69,35 @@ class DownloadFragment : Fragment() {
         val lastUpdated: Long?,
         val lastDownloaded: Long?,
     ) {
-        val image by lazy {
-            if(isImported) {
-                val bitmap = BookDownloader2Helper.getCachedBitmap(activity, apiName, author, name)
-                if(bitmap != null) {
-                    return@lazy UiImage.Bitmap(bitmap)
-                }
+        val isImported: Boolean get() = (apiName == IMPORT_SOURCE || apiName == IMPORT_SOURCE_PDF)
+    }
+    /*val image by lazy {
+        if (isImported) {
+            val bitmap = BookDownloader2Helper.getCachedBitmap(activity, apiName, author, name)
+            if (bitmap != null) {
+                return@lazy UiImage.Bitmap(bitmap)
             }
-            img(posterUrl)
         }
+        img(posterUrl)
+    }*/
+}
+/*
+class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
+    BindingCreator.Inflate(FragmentDownloadsBinding::inflate)
+) {
+    private val viewModel: DownloadViewModel by viewModels()
 
         override fun hashCode(): Int {
             return id
         }
 
-        val isImported: Boolean get() = apiName == IMPORT_SOURCE
+        val isImported: Boolean get() = (apiName == IMPORT_SOURCE || apiName == IMPORT_SOURCE_PDF)
     }
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?,
-    ): View {
-        viewModel = ViewModelProvider(activity ?: this)[DownloadViewModel::class.java]
-        binding = FragmentDownloadsBinding.inflate(inflater)
-        return binding.root
-        //return inflater.inflate(R.layout.fragment_downloads, container, false)
-    }
 
     @SuppressLint("NotifyDataSetChanged")
-    private fun setupGridView() {
-        (binding.viewpager.adapter as? ViewpagerAdapter)?.notifyDataSetChanged()
-        /*val compactView = requireContext().getDownloadIsCompact()
-        val spanCountLandscape = if (compactView) 2 else 6
-        val spanCountPortrait = if (compactView) 1 else 3
-        val orientation = resources.configuration.orientation
-
-        if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            binding.downloadCardSpace.spanCount = spanCountLandscape
-            binding.bookmarkCardSpace.spanCount = spanCountLandscape
-        } else {
-            binding.downloadCardSpace.spanCount = spanCountPortrait
-            binding.bookmarkCardSpace.spanCount = spanCountPortrait
-        }*/
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        setupGridView()
+    override fun fixLayout(view: View) {
+        (binding?.viewpager?.adapter as? ViewpagerAdapter)?.notifyDataSetChanged()
     }
 
     // https://stackoverflow.com/a/67441735/13746422
@@ -167,10 +117,7 @@ class DownloadFragment : Fragment() {
     lateinit var searchExitIcon: ImageView
     lateinit var searchMagIcon: ImageView
 
-
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
+    override fun onBindingCreated(binding: FragmentDownloadsBinding) {
         viewModel.loadAllData(true)
         // activity?.fixPaddingStatusbar(binding.downloadToolbar)
         activity?.fixPaddingStatusbar(binding.downloadRoot)
@@ -226,7 +173,7 @@ class DownloadFragment : Fragment() {
 
             addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
                 override fun onTabSelected(tab: TabLayout.Tab?) {
-                    binding.swipeContainer.isEnabled = binding.bookmarkTabs.selectedTabPosition == 0
+                    //binding.swipeContainer.isEnabled = binding.bookmarkTabs.selectedTabPosition == 0
                     viewModel.switchPage(binding.bookmarkTabs.selectedTabPosition)
                 }
 
@@ -283,24 +230,51 @@ class DownloadFragment : Fragment() {
 
         //swipe_container.setProgressBackgroundColorSchemeColor(requireContext().colorFromAttribute(R.attr.darkBackground))
 
+
         binding.swipeContainer.apply {
             setColorSchemeColors(context.colorFromAttribute(R.attr.colorPrimary))
             setProgressBackgroundColorSchemeColor(context.colorFromAttribute(R.attr.primaryGrayBackground))
             setOnRefreshListener {
-                viewModel.refresh()
-                isRefreshing = false
+                if (isOnDownloads) {
+                    viewModel.refresh()
+                    isRefreshing = false
+
+                } else {
+                    viewModel.refreshReadingProgress()
+                }
             }
         }
 
+        observe(viewModel.isRefreshing) { refreshing ->
+            if (refreshing != binding.swipeContainer.isRefreshing) {
+                binding.swipeContainer.isRefreshing = refreshing
+            }
+        }
+
+
+        lifecycleScope.launch {
+            viewModel.refresh.collect { tab ->
+                (binding.viewpager.adapter as? ViewpagerAdapter)?.updateProgressOfPage(tab)
+            }
+        }
+
+        var canSwip = true
         binding.viewpager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                super.onPageSelected(position)
+                val currentTab = getKey(DOWNLOAD_SETTINGS, CURRENT_TAB, null) ?: 1
+                binding.swipeContainer.isRefreshing =
+                    viewModel.activeRefreshTabs.contains(currentTab)
+            }
+
             override fun onPageScrollStateChanged(state: Int) {
                 super.onPageScrollStateChanged(state)
-                binding.swipeContainer.isEnabled =
-                    isOnDownloads && state == ViewPager2.SCROLL_STATE_IDLE
+                canSwip = state == ViewPager2.SCROLL_STATE_IDLE
             }
         })
-
-        setupGridView()
+        binding.swipeContainer.setOnChildScrollUpCallback { parent, child ->
+            return@setOnChildScrollUpCallback !canSwip// true = can't Swip, false = can swip
+        }
 
         /*binding.downloadCardSpace.apply {
             itemAnimator?.changeDuration = 0
@@ -320,5 +294,6 @@ class DownloadFragment : Fragment() {
                 bookmarkAdapter.submitList(cards.map { it.copy() })
             }
         }*/
+
     }
-}
+}*/

@@ -1,73 +1,84 @@
 package com.lagradost.quicknovel.providers
 
-import android.util.Log
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
 import com.lagradost.quicknovel.LoadResponse
-import com.lagradost.quicknovel.MainAPI
-import com.lagradost.quicknovel.MainActivity.Companion.app
 import com.lagradost.quicknovel.R
+import com.lagradost.quicknovel.Score
 import com.lagradost.quicknovel.SearchResponse
+import com.lagradost.quicknovel.UserReview
 import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newChapterData
+import com.lagradost.quicknovel.newReview
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
 import com.lagradost.quicknovel.setStatus
-import kotlin.math.roundToInt
+import org.jsoup.nodes.Document
 
+object NovelBinProvider : NovelBinAPI()
 
-class NovelBinProvider : MainAPI() {
+open class NovelBinAPI : AllNovelAPI() {
     override val name = "NovelBin"
-    override val mainUrl = "https://novelbin.com"
+    override val mainUrl = "https://novelping.com"
+    override val ajaxUrl = "ajax/chapter-archive"
     override val hasMainPage = true
-    override val infiniteScroll=true
-
+    override val usesCloudFlareKiller = true
     override val iconId = R.drawable.icon_novelbin
+    override val hasReviews = true
 
     override val tags = listOf(
-        "All" to "All",
         "Action" to "action",
+        "Adult" to "adult",
         "Adventure" to "adventure",
-        "Anime & comics" to "anime-&-comics",
+        "Adventurei" to "adventurei",
+        "Anime & Comics" to "anime & comics",
         "Comedy" to "comedy",
         "Drama" to "drama",
         "Eastern" to "eastern",
-        "Fanfiction" to "fanfiction",
+        "Ecchi" to "ecchi",
+        "Fan-fiction" to "fan-fiction",
         "Fantasy" to "fantasy",
         "Game" to "game",
-        "Gender bender" to "gender-bender",
+        "Gender Bender" to "gender bender",
         "Harem" to "harem",
         "Historical" to "historical",
         "Horror" to "horror",
         "Isekai" to "isekai",
         "Josei" to "josei",
-        "Litrpg" to "litrpg",
+        "LGBT+" to "lgbt+",
+        "LitRPG" to "litrpg",
         "Magic" to "magic",
-        "Magical realism" to "magical-realism",
-        "Martial arts" to "martial-arts",
+        "Magical Realism" to "magical realism",
+        "Martial Arts" to "martial arts",
         "Mature" to "mature",
         "Mecha" to "mecha",
-        "Modern life" to "modern-life",
+        "Military" to "military",
+        "Modern Life" to "modern life",
         "Mystery" to "mystery",
         "Other" to "other",
         "Psychological" to "psychological",
+        "Realistic" to "realistic",
         "Reincarnation" to "reincarnation",
         "Romance" to "romance",
-        "School life" to "school-life",
-        "Sci-fi" to "sci-fi",
+        "Romancel" to "romancel",
+        "School Life" to "school life",
+        "Sci-Fi" to "sci-fi",
         "Seinen" to "seinen",
         "Shoujo" to "shoujo",
-        "Shoujo ai" to "shoujo-ai",
+        "Shoujo Ai" to "shoujo ai",
         "Shounen" to "shounen",
-        "Shounen ai" to "shounen-ai",
-        "Slice of life" to "slice-of-life",
+        "Shounen Ai" to "shounen ai",
+        "Slice of Life" to "slice of life",
         "Smut" to "smut",
         "Sports" to "sports",
         "Supernatural" to "supernatural",
         "System" to "system",
+        "Thriller" to "thriller",
         "Tragedy" to "tragedy",
-        "Urban life" to "urban-life",
-        "Video games" to "video-games",
+        "Urban" to "urban",
+        "Video Games" to "video games",
+        "War" to "war",
         "Wuxia" to "wuxia",
         "Xianxia" to "xianxia",
         "Xuanhuan" to "xuanhuan",
@@ -76,15 +87,15 @@ class NovelBinProvider : MainAPI() {
     )
 
     override val orderBys = listOf(
-        "Genre" to "",
-        "Latest Release" to "sort/latest",
-        "Hot Novel" to "sort/top-hot-novel",
-        "Completed Novel" to "sort/completed",
-        "Most Popular" to "sort/top-view-novel",
-        "Store" to "store",
-    )
+        "Trending" to "",
+        "Last updated" to "LASTEST",
+        "Recentrly added" to "NEW",
+        "Most viewed" to "ALL_TIME",
+        "Popular this week" to "POPULAR",
+        "Tpo rated" to "RATING",
+        "Most chapters" to "CHAPTERS"
 
-    private val fullPosterRegex = Regex("/novel_[0-9]*_[0-9]*/")
+    )
 
     override suspend fun loadMainPage(
         page: Int,
@@ -93,104 +104,54 @@ class NovelBinProvider : MainAPI() {
         tag: String?
     ): HeadMainPageResponse {
         val url =
-            if (orderBy == "" && tag != "All") "$mainUrl/genre/$tag?page=$page" else "$mainUrl/${if (orderBy.isNullOrBlank()) "sort/top-hot-novel" else orderBy}?page=$page"
+            if (orderBy == "" && tag != "All") "$mainUrl/novelping-genres/$tag?page=$page" else "$mainUrl/sort/hot?page=$page&sort=$orderBy"
+        println(url)
         val document = app.get(url).document
-
+        println(document)
         return HeadMainPageResponse(
             url,
             list = document.select("div.list>div.row").mapNotNull { element ->
                 val a =
                     element.selectFirst("div > div > h3.novel-title > a") ?: return@mapNotNull null
-
-                val latestChapNum = element.selectFirst("div.col-xs-2.text-info a")
-                    ?.text()
-                    ?.let { Regex("""\d+""").find(it)?.value }
-                SearchResponse(
+                newSearchResponse(
                     name = a.text(),
                     url = fixUrlNull(a.attr("href")) ?: return@mapNotNull null,
-                    fixUrlNull(element.selectFirst("div > div > img")?.attr("data-src")?.replace( fullPosterRegex, "/novel/")),
-                    null,
-                    null,
-                    this.name,
-                    totalChapterCount = latestChapNum
-                )
+                ){
+                    posterUrl = fixUrlNull(element.selectFirst("img")?.attr("src"))
+                }
             })
     }
 
-    override suspend fun loadHtml(url: String): String? {
-        val document = app.get(url).document
-        val content = (document.selectFirst("#chapter-content")
-            ?: document.selectFirst("#chr-content"))
-        if (content == null) return null
-
-        return content.html()
-            .replace(
-                "<iframe .* src=\"//ad.{0,2}-ads.com/.*\" style=\".*\"></iframe>".toRegex(),
-                " "
-            ).replace(
-                " If you find any errors ( broken links, non-standard content, etc.. ), Please let us know &lt; report chapter &gt; so we can fix it as soon as possible.",
-                " "
-            ).replace(
-                "If you find any errors ( Ads popup, ads redirect, broken links, non-standard content, etc.. ), Please let us know &lt; report chapter &gt; so we can fix it as soon as possible.",
-                " "
-            ).replace("[Updated from F r e e w e b n o v e l. c o m]", "")
-
-    }
-
-    override suspend fun search(query: String): List<SearchResponse> {
-        val document =
-            app.get("$mainUrl/search?keyword=$query").document // AJAX, MIGHT ADD QUICK SEARCH
-
-        return document.select("#list-page>.archive>.list>.row").mapNotNull { h ->
-            val title = h.selectFirst(">div>div>.truyen-title>a")
-                ?: h.selectFirst(">div>div>.novel-title>a") ?: return@mapNotNull null
-            val latestChapNum = h.selectFirst("div.col-xs-2.text-info a")
-                ?.text()
-                ?.let { Regex("""\d+""").find(it)?.value }
-            newSearchResponse(title.text(), title.attr("href") ?: return@mapNotNull null) {
-                posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src")?.replace( fullPosterRegex, "/novel/"))
-                totalChapterCount=latestChapNum
+    private fun getRelated(dc: Document): List<SearchResponse>{
+        return dc.select("section.related-novels > ul > li > a").mapNotNull { element ->
+            val href = element.attr("href") ?: return@mapNotNull null
+            val title = element.selectFirst(".related-novel__title")?.text() ?: return@mapNotNull null
+            newSearchResponse(
+                name = title,
+                url = href
+            ) {
+                posterUrl = fixUrlNull(element.selectFirst("img")?.attr("src"))
             }
         }
     }
 
-    override suspend fun search(query: String,page: Int): List<SearchResponse> {
-        val document =app.get("$mainUrl/search?keyword=$query&page=$page").document // AJAX, MIGHT ADD QUICK SEARCH
-
-        val isLastPageReached = document.selectFirst("ul.pagination li.last.disabled") != null
-        isLastPage=isLastPageReached
-
-
-
-        return document.select("#list-page>.archive>.list>.row").mapNotNull { h ->
-            val title = h.selectFirst(">div>div>.truyen-title>a")
-                ?: h.selectFirst(">div>div>.novel-title>a") ?: return@mapNotNull null
-            val latestChapNum = h.selectFirst("div.col-xs-2.text-info a")
-                ?.text()
-                ?.let { Regex("""\d+""").find(it)?.value }
-            newSearchResponse(title.text(), title.attr("href") ?: return@mapNotNull null) {
-                posterUrl = fixUrlNull(h.selectFirst(">div>div>img")?.attr("src")?.replace( fullPosterRegex, "/novel/"))
-                totalChapterCount=latestChapNum
-            }
-        }
-    }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
-
         val name =
             document.selectFirst("h3.title")?.text() ?: throw ErrorLoadingException("invalid name")
 
         val dataNovelId = document.select("#rating").attr("data-novel-id")
-        val ajaxUrl = "$mainUrl/ajax/chapter-archive?novelId=$dataNovelId"
+        val ajaxUrl = "$mainUrl/$ajaxUrl?novelId=$dataNovelId"
         val chapterData = app.get(ajaxUrl).document
+
         var parsed = chapterData.select("select > option")
         if (parsed.isEmpty()) {
-            parsed = chapterData.select(".list-chapter>li>a")
+            parsed = chapterData.select("li[data-chapter-item] > a")
         }
 
         val data = parsed.mapNotNull { c ->
-            var cUrl = c.attr("value")
+            var cUrl = c?.attr("value")
             if (cUrl.isNullOrBlank()) {
                 cUrl = c.attr("href")
             }
@@ -204,22 +165,171 @@ class NovelBinProvider : MainAPI() {
         }
 
         return newStreamResponse(name, url, data) {
-            tags = document.select("ul.info > li:nth-child(5) a").map {
-                it.text()
-            }
-            author = document.selectFirst("ul.info > li:nth-child(1) > a")?.text()
-            posterUrl = fixUrlNull(document.select("div.book > img").attr("data-src"))
+            val infoDivs = document.select("div.info > div").takeIf{ !it.isEmpty() } ?: document.select("ul.info > li")
+
+            author = infoDivs.find { it.text().contains("Author:") }?.selectFirst("a")?.text()
+            tags = infoDivs.find { it.text().contains("Genre") }?.select("a")?.mapNotNull { it.text().takeIf { t -> t.trim().isNotBlank() } }
+
+            val imgElement = document.selectFirst("div.book img")
+            posterUrl = fixUrlNull(
+                imgElement?.attr("src").takeIf { !it.isNullOrBlank() }  ?: imgElement?.attr("data-src")
+            )
             synopsis = document.selectFirst("div.desc-text")?.text()
             peopleVoted =
                 document.selectFirst(" div.small > em > strong:nth-child(3) > span")?.text()
                     ?.toIntOrNull() ?: 0
-            rating = document.selectFirst("div.small > em > strong:nth-child(1) > span")?.text()
-                ?.toFloatOrNull()?.times(100)?.roundToInt()
+            score = Score.from10(document.selectFirst("div.small > em > strong:nth-child(1) > span")?.text())
+            related = getRelated(document)
+            reviewData = url
+            setStatus(infoDivs.find { it.text().contains("Status:") }?.selectFirst("a")?.text())
+        }
+    }
 
-            setStatus(
-                document.selectFirst("ul.info > li:nth-child(3) > a")?.selectFirst("a")
-                    ?.text()
+    override suspend fun loadReviews(url: String, page: Int, data: String?): List<UserReview> {
+        val slug = url.removeSuffix("/").substringAfter("/book/")
+        val realUrl = "$mainUrl/api-web/novels/$slug/comments?page=$page&limit=10&sort=most-liked&scope=novel"
+
+        val response = app.get(realUrl).parsedSafe<ReviewResponse>()
+
+        return response?.items?.mapNotNull { item ->
+            newReview(org.jsoup.Jsoup.parse(item.content ?: return@mapNotNull null).text()) {
+                username = item.disqusUser?.name
+                date = item.createdDate
+                avatarUrl = item.disqusUser?.avatarUrl
+                containsSpoilers = item.isSpoiler == true
+            }
+        } ?: emptyList()
+    }
+    data class ReviewResponse(@JsonProperty("items") val items: List<ReviewItem>?)
+
+    data class ReviewItem(
+        @JsonProperty("content") val content: String?,
+        @JsonProperty("isSpoiler") val isSpoiler: Boolean?,
+        @JsonProperty("user") val disqusUser: DisqusUser?,
+        @JsonProperty("created_date") val createdDate: String?
+    )
+
+    data class DisqusUser(
+        @JsonProperty("account") val name: String?,
+        @JsonProperty("avatar") val avatarUrl: String?
+    )
+    /*
+    suspend fun getChapters(slug: String): List<ChapterData> {
+        val response = app.get("$mainUrl/api-web/novels/$slug/chapters?sort=asc")
+
+        val chapters = try {
+            response.parsed<ChaptersResponse>().items
+        } catch (_: Exception) {
+            response.parsed<ChaptersResponseNested>().items.flatten()
+        }
+
+        return chapters.mapNotNull { ch ->
+            if (ch.premium || ch.platinum) return@mapNotNull null
+
+            newChapterData(
+                name = ch.chapterName,
+                url = "$mainUrl/api-web/novels/$slug/chapters/${ch.chapterId}"
             )
         }
     }
+
+
+    override suspend fun load(url: String): LoadResponse {
+        val realUrl = url.replace("https://novelbin.com/b/", mainUrl + "/novel/")
+        val document = app.get(realUrl).document
+        val title = document.selectFirst("title")?.text() ?: throw ErrorLoadingException("No title")
+
+        val chapters = getChapters(realUrl.substringAfter("/novel/"))
+        return newStreamResponse(title, realUrl, chapters) {
+            this.posterUrl = document.selectFirst("meta[property=og:image]")?.attr("content")
+            this.synopsis = document.selectFirst("meta[name=description]")?.attr("content")
+            this.author = document.selectFirst("meta[name=author]")?.attr("content")
+            this.tags =
+                document.selectFirst("meta[name=category]")?.attr("content")?.let { listOf(it.trim().lowercase().replaceFirstChar { char -> char.uppercase() }) }
+            setStatus(document.selectFirst("meta[name=og:novel:status]")?.attr("content"))
+            related = getRelated(document)
+        }
+    }
+
+
+
+    override suspend fun loadHtml(url: String): String {
+        val response = app.get(url).parsed<ChapterResponse>()
+        val content = response.item?.chapterInfo?.chapterContent ?:throw ErrorLoadingException("No content")
+        return content
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        val url = "$mainUrl/api-web/novels?limit=5&page=1&status=all&sort=SEARCH_KEYWORD&genre=ALL&keyword=${Uri.encode(query.trim()).replace("%20","+")}"
+        val document = app.get(url).parsed<MainPageResponse>()
+
+        return document.items.map { card ->
+            val href = "$mainUrl/novel/" + card.novelId
+            val title = card.novelName
+            newSearchResponse(
+                name = title,
+                url = href
+            ) {
+                posterUrl = "https://images.novelarrow.com/novel_164_245/" + card.novelId + ".jpg"
+            }
+        }
+    }
+
+    data class MainPageResponse(
+        @JsonProperty("items") val items: List<NovelInfo>
+    )
+
+    data class NovelInfo(
+        @JsonProperty("novel_name") val novelName: String,
+        @JsonProperty("novel_id") val novelId: String
+    )
+
+    data class ChaptersResponse(
+        @JsonProperty("items") val items: List<ChapterInfo>,
+        @JsonProperty("pagination") val pagination: Pagination
+    )
+
+    data class ChaptersResponseNested(
+        @JsonProperty("items") val items: List<List<ChapterInfo>>,
+        @JsonProperty("pagination") val pagination: Pagination
+    )
+
+    data class ChapterResponse(
+        @JsonProperty("item") val item: ChapterItemWrapper?
+    )
+
+    data class ChapterItemWrapper(
+        @JsonProperty("chapterInfo") val chapterInfo: ChapterInfo?
+    )
+
+    data class ChapterInfo(
+        @JsonProperty("chapter_id")
+        val chapterId: String?,
+
+        @JsonProperty("chapter_name")
+        val chapterName: String,
+
+        @JsonProperty("platinum_content")
+        val platinum: Boolean = false,
+
+        @JsonProperty("premium_content")
+        val premium: Boolean = false,
+
+        @JsonProperty("coin_price")
+        val coinPrice: Int? = 0,
+
+        @JsonProperty("comments_count")
+        val commentsCount: Int? = 0,
+
+        @JsonProperty("chapter_content")
+        val chapterContent: String?
+    )
+
+    data class Pagination(
+        @JsonProperty("page") val page: Int,
+        @JsonProperty("limit") val limit: Int,
+        @JsonProperty("total") val total: Int,
+        @JsonProperty("totalPages") val totalPages: Int
+    )
+     */
 }

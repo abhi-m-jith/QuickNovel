@@ -3,7 +3,14 @@ package com.lagradost.quicknovel
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.mvvm.safeApiCall
+import com.lagradost.quicknovel.ui.common.ImmutableHeadMainPageResponse
+import com.lagradost.quicknovel.ui.common.ImmutableReview
+import com.lagradost.quicknovel.ui.common.ImmutableSearchResponse
 import com.lagradost.quicknovel.util.Coroutines.threadSafeListOf
+import kotlinx.collections.immutable.PersistentList
+import kotlinx.collections.immutable.toPersistentList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 
 data class OnGoingSearch(
@@ -26,11 +33,12 @@ private fun String?.removeAds(): String? {
         // https://stackoverflow.com/questions/14384431/html-element-for-ad
 
         document.html()
-    } catch (t : Throwable) {
+    } catch (t: Throwable) {
         logError(t)
         this
     }
 }
+
 
 class APIRepository(val api: MainAPI) {
     val unixTime: Long
@@ -109,6 +117,52 @@ class APIRepository(val api: MainAPI) {
         }
     }
 
+    suspend fun loadResult(
+        url: String,
+        allowCache: Boolean = true
+    ): Result<ImmutableSearchResponse> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                try {
+                    if (api.hasRateLimit) {
+                        api.rateLimitMutex.lock()
+                    }
+                    val fixedUrl = api.fixUrl(url)
+                    val lookingForHash = api.name to fixedUrl
+
+                    if (allowCache) {
+                        synchronized(cache) {
+                            for (item in cache) {
+                                // 10 min save
+                                if (item.hash == lookingForHash && (unixTime - item.unixTime) < cacheTimeSec) {
+                                    return@runCatching ImmutableSearchResponse.from(item.response)
+                                }
+                            }
+                        }
+                    }
+
+                    val response = api.load(fixedUrl) ?: throw ErrorLoadingException("No data")
+                    val add = SavedLoadResponse(unixTime, response, lookingForHash)
+                    if (allowCache) {
+                        synchronized(cache) {
+                            if (cache.size > cacheSize) {
+                                cache[cacheIndex] = add // rolling cache
+                                cacheIndex = (cacheIndex + 1) % cacheSize
+                            } else {
+                                cache.add(add)
+                            }
+                        }
+                    }
+                    /** Do not cache the ImmutableSearchResponse, as it contain stuff that needs updating */
+                    ImmutableSearchResponse.from(response)
+                } finally {
+                    if (api.hasRateLimit) {
+                        api.rateLimitMutex.unlock()
+                    }
+                }
+            }
+        }
+
     suspend fun search(query: String): Resource<List<SearchResponse>> {
         return safeApiCall {
             try {
@@ -132,12 +186,26 @@ class APIRepository(val api: MainAPI) {
         }
     }
 
+    suspend fun searchResult(query: String): Result<List<ImmutableSearchResponse>> = runCatching {
+        api.search(query)?.map(ImmutableSearchResponse::from)
+            ?: throw ErrorLoadingException("No data")
+    }
+
+    suspend fun loadMainPageResult(
+        page: Int,
+        mainCategory: String?,
+        orderBy: String?,
+        tag: String?,
+    ): Result<ImmutableHeadMainPageResponse> = runCatching {
+        ImmutableHeadMainPageResponse.from(api.loadMainPage(page, mainCategory, orderBy, tag))
+    }
+
     /**
      * Automatically strips adsbygoogle
      * */
     suspend fun loadHtml(url: String): String? {
         return try {
-            api.loadHtml(api.fixUrl(url))?.removeAds()
+            api.loadHtml(url)?.removeAds()
         } catch (e: Exception) {
             logError(e)
             null
@@ -147,10 +215,20 @@ class APIRepository(val api: MainAPI) {
     suspend fun loadReviews(
         url: String,
         page: Int,
-        showSpoilers: Boolean = false
+        data: String?,
     ): Resource<List<UserReview>> {
         return safeApiCall {
-            api.loadReviews(url, page, showSpoilers)
+            api.loadReviews(url, page, data)
+        }
+    }
+
+    suspend fun loadReviewsResult(
+        url: String,
+        page: Int,
+        data: String?,
+    ): Result<PersistentList<ImmutableReview>> {
+        return runCatching {
+            api.loadReviews(url, page, data).map(ImmutableReview::from).toPersistentList()
         }
     }
 

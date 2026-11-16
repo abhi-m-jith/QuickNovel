@@ -23,8 +23,6 @@ import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ListView
-import android.widget.SeekBar
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -50,7 +48,6 @@ import com.lagradost.quicknovel.databinding.ColorRoundCheckmarkBinding
 import com.lagradost.quicknovel.databinding.ReadBottomSettingsBinding
 import com.lagradost.quicknovel.databinding.ReadMainBinding
 import com.lagradost.quicknovel.databinding.SingleOverscrollChapterBinding
-import com.lagradost.quicknovel.mvvm.BookHelper
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.observe
 import com.lagradost.quicknovel.mvvm.observeNullable
@@ -66,7 +63,6 @@ import com.lagradost.quicknovel.ui.TextAdapter
 import com.lagradost.quicknovel.ui.TextConfig
 import com.lagradost.quicknovel.ui.TextVisualLine
 import com.lagradost.quicknovel.ui.ViewHolderState
-import com.lagradost.quicknovel.ui.result.ReplaceWordsBottomSheet
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.SingleSelectionHelper.showDialog
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
@@ -76,14 +72,19 @@ import com.lagradost.quicknovel.util.UIHelper.popupMenu
 import com.lagradost.quicknovel.util.UIHelper.systemFonts
 import com.lagradost.quicknovel.util.divCeil
 import com.lagradost.quicknovel.util.toPx
-import java.io.File
 import java.lang.Integer.max
 import java.lang.ref.WeakReference
 import java.util.Locale
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.properties.Delegates
-
+import com.google.android.material.tabs.TabLayout
+import com.lagradost.cloudstream4.AppSettings
+import com.lagradost.quicknovel.ReadActivityViewModel.MLSettings.Companion.AUTO_LANG
+import com.lagradost.quicknovel.util.SubtitleHelper
+import com.lagradost.quicknovel.util.UIHelper.fixSystemBarsPadding
+import kotlin.collections.map
+import com.lagradost.quicknovel.util.translation.models.TranslatorAgents
 
 class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     companion object {
@@ -249,12 +250,20 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                     viewModel.forwardsTTS()
                     return true
                 } else if (viewModel.scrollWithVolume) {
+                    val topY = getTopY()
                     val bottomY = getBottomY()
                     val lines = getAllLines()
                     val line = lines.firstOrNull {
                         it.bottom >= bottomY
-                    } ?: lines.lastOrNull() ?: return true
-                    binding.realText.scrollBy(0, line.top - getTopY())
+                    } ?: lines.lastOrNull()
+                    // Chapter headers and loading rows have no text lines. Once the
+                    // last line reaches the top, keep moving through those rows.
+                    val distance = line?.let { it.top - topY }
+                        ?.takeIf { it > 0 } ?: (bottomY - topY).coerceAtLeast(1)
+                    binding.realText.scrollBy(0, distance)
+                    // scrollBy does not change the scroll state, so explicitly
+                    // update the reading position and request adjacent chapters.
+                    onScroll()
 
                     return true
                 }
@@ -271,8 +280,11 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                         val topY = getTopY()
                         val line = lines.firstOrNull {
                             it.top >= topY
-                        } ?: return@post
-                        binding.realText.scrollBy(0, line.top - getTopY())
+                        }
+                        if (line != null) {
+                            binding.realText.scrollBy(0, line.top - topY)
+                        }
+                        onScroll()
                     }
 
                     return true
@@ -290,18 +302,20 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         finish()
     }
 
-    private fun registerBattery() {
-        val mBatInfoReceiver: BroadcastReceiver = object : BroadcastReceiver() {
-            override fun onReceive(ctxt: Context?, intent: Intent) {
-                val batteryPct: Float = run {
-                    val level: Int = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                    val scale: Int = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                    level * 100 / scale.toFloat()
-                }
-                binding.readBattery.text =
-                    getString(R.string.battery_format).format(batteryPct.toInt())
+    val mBatInfoReceiver: BroadcastReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctxt: Context?, intent: Intent) {
+            val batteryPct: Float = run {
+                val level: Int = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale: Int = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                level * 100 / scale.toFloat()
             }
+            binding.readBattery.text =
+                binding.readBattery.context?.getString(R.string.battery_format)
+                    ?.format(batteryPct.toInt())
         }
+    }
+
+    private fun registerBattery() {
         this.registerReceiver(mBatInfoReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
     }
 
@@ -440,8 +454,6 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     var lockTop: Int? = null
     var lockBottom: Int? = null
     var currentScroll: Int = 0
-
-    private var readSettingsBottomSheet: BottomSheetDialog? = null
 
     private fun updateTTSLine(line: TTSHelper.TTSLine?, depth: Int = 0) {
         // update the visual component
@@ -683,6 +695,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
     override fun onDestroy() {
         viewModel.stopTTS()
+        this.unregisterReceiver(mBatInfoReceiver)
         super.onDestroy()
     }
 
@@ -691,25 +704,16 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             .toFloat() * this.stepSize
     }
 
+
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
-
-
-    private fun openReplaceWordsDialog() {
-
-        ReplaceWordsBottomSheet.newInstance(bookId)
-            .show(supportFragmentManager, "ReplaceWordsBottomSheet")
-    }
-
-
-    private val bookId=BookHelper.current_book_ID
-
-
     override fun onCreate(savedInstanceState: Bundle?) {
         CommonActivity.loadThemes(this)
         super.onCreate(savedInstanceState)
         readActivity = this
         binding = ReadMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        fixSystemBarsPadding(binding.readerBottomViewHolder, padTop = false, overlayCutout = false)
+        fixSystemBarsPadding(binding.readToolbarHolder, padBottom = false, overlayCutout = false)
 
         registerBattery()
 
@@ -726,7 +730,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 textFont = viewModel.textFont,
                 backgroundColor = viewModel.backgroundColor,
                 bionicReading = viewModel.bionicReading,
-                isTextSelectable = viewModel.isTextSelectable
+                isTextSelectable = viewModel.isTextSelectable,
+                verticalPadding = viewModel.textVerticalPadding,
             ).also { config ->
                 updateOtherTextConfig(config)
             }
@@ -765,12 +770,18 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             }
         }
 
+        observe(viewModel.textVerticalPaddingLive) { padding ->
+            if (textAdapter.changeTextVerticalPadding(padding)) {
+                updateTextAdapterConfig()
+            }
+        }
+
+
         observe(viewModel.bionicReadingLive) { color ->
             if (textAdapter.changeBionicReading(color)) {
                 updateTextAdapterConfig()
             }
         }
-
         observe(viewModel.isTextSelectableLive) { isTextSelectable ->
             if (textAdapter.changeTextSelectable(isTextSelectable)) {
                 updateTextAdapterConfig()
@@ -873,7 +884,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 // cant be too safe here
                 val validChapter =
                     currentChapter != null && currentChapter >= 0 && currentChapter < titles.size
-                if (validChapter && currentChapter != null) {
+                if (validChapter) {
                     builderSingle.setTitle(titles[currentChapter].asString(this)) //  "Select Chapter"
                 } else {
                     builderSingle.setTitle(R.string.select_chapter)
@@ -893,7 +904,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 dialog.show()
 
                 dialog.listView.choiceMode = AbsListView.CHOICE_MODE_SINGLE
-                if (validChapter && currentChapter != null) {
+                if (validChapter) {
                     dialog.listView.setSelection(currentChapter)
                     dialog.listView.setItemChecked(currentChapter, true)
                 }
@@ -1089,17 +1100,28 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                         }
                     } else {
                         updateFromCode = false
+                        onScroll()
                     }
 
-                    onScroll()
                     super.onScrolled(recyclerView, dx, dy)
 
                     // binding.tmpTtsEnd.fixLine((getBottomY()- remainingBottom) + 7.toPx)
                     // binding.tmpTtsStart.fixLine(remainingTop + 7.toPx)
+
+                }
+
+                //this is to reduce onScroll calls
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    super.onScrollStateChanged(recyclerView, newState)
+                    if(newState == RecyclerView.SCROLL_STATE_SETTLING || newState == RecyclerView.SCROLL_STATE_IDLE){
+                        onScroll()
+                    }
                 }
             })
+
         }
 
+        //here inserted novel chapter text into recyclerview
         observe(viewModel.chapter) { chapter ->
             cachedChapter = chapter.data
 
@@ -1130,10 +1152,32 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
         binding.readActionSettings.setOnClickListener {
             val bottomSheetDialog = BottomSheetDialog(this)
-            readSettingsBottomSheet=bottomSheetDialog
 
             val binding = ReadBottomSettingsBinding.inflate(layoutInflater, null, false)
             bottomSheetDialog.setContentView(binding.root)
+
+            //Create and Order tabs
+            val tabsToViews = listOf(
+                R.string.read_display_settings to binding.tabSettingsContainer,     // Tab 0 — Settings
+                R.string.tab_translation to binding.tabTranslationContainer,  // Tab 1 — Translation
+                R.string.tts_voice to binding.tabVoiceContainer,        // Tab 2 — Voice
+                R.string.read_text_size to binding.tabTextContainer,         // Tab 3 — Text
+            )
+            tabsToViews.forEachIndexed { index, (resId, view) ->
+                binding.readSettingsTabs.addTab(binding.readSettingsTabs.newTab().setText(resId))
+                view.isVisible = index == 0
+            }
+
+            // Show specific tab
+            binding.readSettingsTabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+                override fun onTabSelected(tab: TabLayout.Tab) {
+                    tabsToViews.forEachIndexed { index, (_, view) ->
+                        view.isVisible = index == tab.position
+                    }
+                }
+                override fun onTabUnselected(tab: TabLayout.Tab) {}
+                override fun onTabReselected(tab: TabLayout.Tab) {}
+            })
 
             binding.readReadingType.setText(viewModel.readerType.stringRes)
             binding.readReadingType.setOnLongClickListener {
@@ -1200,6 +1244,18 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 }
             }
 
+            binding.readSettingsTextVerticalPaddingText.setOnClickListener {
+                it.popupMenu(
+                    items = listOf(1 to R.string.reset_value),
+                    selectedItemId = null
+                ) {
+                    if (itemId == 1) {
+                        viewModel.textVerticalPadding = 7.5f
+                        binding.readSettingsTextVerticalPadding.setValueRounded(viewModel.textVerticalPadding)
+                    }
+                }
+            }
+
             binding.readSettingsTtsPitch.apply {
                 setValueRounded(viewModel.ttsPitch)
                 addOnChangeListener { slider, value, fromUser ->
@@ -1254,6 +1310,14 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 }
             }
 
+            binding.readSettingsTextVerticalPadding.apply {
+                setValueRounded(viewModel.textVerticalPadding)
+                addOnChangeListener { slider, value, fromUser ->
+                    viewModel.textVerticalPadding = value
+                }
+            }
+
+
             binding.readShowFonts.apply {
                 //text = UIHelper.parseFontFileName(getKey(EPUB_FONT))
                 setOnClickListener {
@@ -1273,14 +1337,14 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 if (view == null) return@setOnClickListener
                 val context = view.context
 
-                val items = ReadActivityViewModel.MLSettings.list
+                val items = ReadActivityViewModel.MLSettings.mapList
 
                 context.showDialog(
-                    items.map {
-                        it.second
+                    items.map { (key,value) ->
+                        "${SubtitleHelper.getFlagFromIso(key)} $value"
                     },
                     items.map { it.first }.indexOf(viewModel.mlToLanguage),
-                    context.getString(R.string.sleep_timer), false, {}
+                    context.getString(R.string.translate_to), false, {}
                 ) { index ->
                     viewModel.mlToLanguage = items[index].first
                     binding.readMlTo.text =
@@ -1288,18 +1352,36 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 }
             }
 
+            binding.readOnlineTranslationSwitch.isChecked = viewModel.currentAgent != TranslatorAgents.OFFLINE
+            binding.readOnlineTranslationSwitch.setOnCheckedChangeListener { _, isChecked ->
+                viewModel.mlTranslationAgent = if (isChecked) TranslatorAgents.ONLINE.name
+                else TranslatorAgents.OFFLINE.name
+
+                //Do not allow automatic detection of the target language; the user should know that themselves (they should know the name of their own language).
+                //It could probably be automated, but I have no idea.
+                if (isChecked == false && viewModel.mlFromLanguage == AUTO_LANG) {
+                    viewModel.mlFromLanguage = "en"
+                    binding.readMlFrom.text = ReadActivityViewModel.MLSettings.fromShortToDisplay("en")
+                }
+            }
+
             binding.readMlFrom.setOnClickListener { view ->
                 if (view == null) return@setOnClickListener
                 val context = view.context
 
-                val items = ReadActivityViewModel.MLSettings.list
+                val items = if (viewModel.currentAgent != TranslatorAgents.OFFLINE) {
+                    ReadActivityViewModel.MLSettings.mapOnlineList
+                } else {
+                    ReadActivityViewModel.MLSettings.mapList
+                }
+
 
                 context.showDialog(
-                    items.map {
-                        it.second
+                    items.map { (key,value) ->
+                        "${SubtitleHelper.getFlagFromIso(key)} $value"
                     },
-                    items.map { it.first }.indexOf(viewModel.mlFromLanguage),
-                    context.getString(R.string.sleep_timer), false, {}
+                    items.map { item -> item.first }.indexOf(viewModel.mlFromLanguage),
+                    context.getString(R.string.translate_from), false, {}
                 ) { index ->
                     viewModel.mlFromLanguage = items[index].first
                     binding.readMlFrom.text =
@@ -1312,23 +1394,20 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 ioSafe {
                     try {
                         if (!viewModel.requireMLDownload()) {
-                            viewModel.applyMLSettings(true)
+                            viewModel.applyMLSettings(false)
                             runOnUiThread { bottomSheetDialog.dismiss() }
-
-                            return@ioSafe
-                        }
-                        runOnUiThread {
-                            val builder: AlertDialog.Builder =
+                        } else {
+                            runOnUiThread {
                                 AlertDialog.Builder(view.context, R.style.AlertDialogCustom)
-                            builder.setTitle(R.string.download_ml)
-                            builder.setMessage(R.string.download_ml_long)
-                            builder.setPositiveButton(R.string.download) { _, _ ->
-                                viewModel.applyMLSettings(true)
-                                bottomSheetDialog.dismiss()
+                                    .setTitle(R.string.download_ml)
+                                    .setMessage(R.string.download_ml_long)
+                                    .setPositiveButton(R.string.download) { _, _ ->
+                                        viewModel.applyMLSettings(true)
+                                        bottomSheetDialog.dismiss()
+                                    }
+                                    .setNegativeButton(R.string.cancel, null)
+                                    .show()
                             }
-                            builder.setCancelable(true)
-                            builder.setNegativeButton(R.string.cancel) { _, _ -> }
-                            builder.show()
                         }
                     } catch (t: Throwable) {
                         showToast(t.message ?: t.toString())
@@ -1352,23 +1431,23 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
             binding.readLanguage.setOnClickListener { _ ->
                 ioSafe {
-                    viewModel.ttsSession.requireTTS({ tts ->
-                        runOnUiThread {
-                            val languages = mutableListOf<Locale?>(null).apply {
-                                addAll(tts.availableLanguages?.filterNotNull() ?: emptySet())
-                            }
-                            val ctx = binding.readLanguage.context ?: return@runOnUiThread
-                            ctx.showDialog(
-                                languages.map {
-                                    it?.displayName ?: ctx.getString(R.string.default_text)
-                                },
-                                languages.indexOf(tts.voice?.locale),
-                                ctx.getString(R.string.tts_locale), false, {}
-                            ) { index ->
-                                viewModel.setTTSLanguage(languages.getOrNull(index))
-                            }
+                    val tts = viewModel.ttsSession?.requireTTS() ?: return@ioSafe
+
+                    runOnUiThread {
+                        val languages = mutableListOf<Locale?>(null).apply {
+                            addAll(tts.availableLanguages?.filterNotNull() ?: emptySet())
                         }
-                    }, action = { false })
+                        val ctx = binding.readLanguage.context ?: return@runOnUiThread
+                        ctx.showDialog(
+                            languages.map {
+                                it?.displayName ?: ctx.getString(R.string.default_text)
+                            },
+                            languages.indexOf(tts.voice?.locale),
+                            ctx.getString(R.string.tts_locale), false, {}
+                        ) { index ->
+                            viewModel.setTTSLanguage(languages.getOrNull(index))
+                        }
+                    }
                 }
             }
 
@@ -1420,38 +1499,38 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
             binding.readVoice.setOnClickListener {
                 ioSafe {
-                    viewModel.ttsSession.requireTTS({ tts ->
-                        runOnUiThread {
-                            val matchAgainst = tts.voice.locale
-                            val ctx = binding.readLanguage.context ?: return@runOnUiThread
-                            val voices =
-                                mutableListOf<Pair<String, Voice?>>(ctx.getString(R.string.default_text) to null).apply {
-                                    val voices =
-                                        tts.voices.filter { it != null && it.locale == matchAgainst }
-                                            .map {
-                                                // ${"★".repeat(it.quality / 100) }
-                                                ("${it.name} ${
-                                                    if (it.isNetworkConnectionRequired) {
-                                                        "(☁)"
-                                                    } else {
-                                                        ""
-                                                    }
-                                                }") to it
-                                            }
+                    val tts = viewModel.ttsSession?.requireTTS() ?: return@ioSafe
 
-                                    addAll(voices.sortedBy { (name, _) -> name })
-                                }
+                    runOnUiThread {
+                        val matchAgainst = tts.voice.locale
+                        val ctx = binding.readLanguage.context ?: return@runOnUiThread
+                        val voices =
+                            mutableListOf<Pair<String, Voice?>>(ctx.getString(R.string.default_text) to null).apply {
+                                val voices =
+                                    tts.voices.filter { it != null && it.locale == matchAgainst }
+                                        .map {
+                                            // ${"★".repeat(it.quality / 100) }
+                                            ("${it.name} ${
+                                                if (it.isNetworkConnectionRequired) {
+                                                    "(☁)"
+                                                } else {
+                                                    ""
+                                                }
+                                            }") to it
+                                        }
 
-                            ctx.showDialog(
-                                voices.map { it.first },
-                                voices.map { it.second }.indexOf(tts.voice),
-                                ctx.getString(R.string.tts_locale), false, {}
-                            ) { index ->
-                                val voice = voices.getOrNull(index)?.second
-                                viewModel.setTTSVoice(voice)
+                                addAll(voices.sortedBy { (name, _) -> name })
                             }
+
+                        ctx.showDialog(
+                            voices.map { it.first },
+                            voices.map { it.second }.indexOf(tts.voice),
+                            ctx.getString(R.string.tts_locale), false, {}
+                        ) { index ->
+                            val voice = voices.getOrNull(index)?.second
+                            viewModel.setTTSVoice(voice)
                         }
-                    }, action = { false })
+                    }
                 }
             }
 
@@ -1461,21 +1540,17 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                     showToast(getString(R.string.reload_chapter_format).format(""))
                     viewModel.reloadChapter()
                 }
-                replaceScreen.setOnClickListener {
-                    readSettingsBottomSheet?.dismiss()
-                    readSettingsBottomSheet = null
-
-                    openReplaceWordsDialog()
-                }
 
                 readSettingsScrollVol.isChecked = viewModel.scrollWithVolume
                 readSettingsScrollVol.setOnCheckedChangeListener { _, isChecked ->
                     viewModel.scrollWithVolume = isChecked
                 }
 
-                readSettingsAuthorNotes.isChecked = viewModel.authorNotes
+                val settings = AppSettings(this@ReadActivity2)
+
+                readSettingsAuthorNotes.isChecked = settings.reader.authorNotes.get()
                 readSettingsAuthorNotes.setOnCheckedChangeListener { _, isChecked ->
-                    viewModel.authorNotes = isChecked
+                    settings.reader.authorNotes.set(isChecked)
                     viewModel.refreshChapters()
                 }
 
@@ -1513,6 +1588,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 readSettingsKeepScreenActive.setOnCheckedChangeListener { _, isChecked ->
                     viewModel.screenAwake = isChecked
                 }
+
             }
 
             val bgColors = resources.getIntArray(R.array.readerBgColors)

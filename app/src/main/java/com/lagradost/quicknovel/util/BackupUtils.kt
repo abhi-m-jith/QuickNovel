@@ -1,39 +1,25 @@
 package com.lagradost.quicknovel.util
 
-import android.content.ContentValues
+import android.app.Activity
 import android.content.Context
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import android.widget.Toast
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.fragment.app.FragmentActivity
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.quicknovel.BookDownloader2Helper.checkWrite
 import com.lagradost.quicknovel.BookDownloader2Helper.requestRW
-import com.lagradost.quicknovel.CommonActivity.showToast
 import com.lagradost.quicknovel.DataStore
 import com.lagradost.quicknovel.DataStore.getDefaultSharedPrefs
 import com.lagradost.quicknovel.DataStore.getSharedPrefs
 import com.lagradost.quicknovel.DataStore.mapper
-import com.lagradost.quicknovel.R
-import com.lagradost.quicknovel.mvvm.logError
-import com.lagradost.quicknovel.ui.settings.SettingsFragment
-import com.lagradost.safefile.SafeFile
-import java.io.IOException
-import java.io.OutputStream
-import java.io.PrintWriter
+import com.lagradost.quicknovel.ErrorLoadingException
+import com.lagradost.quicknovel.FileHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.lang.System.currentTimeMillis
 import java.text.SimpleDateFormat
-import java.util.*
-import kotlin.concurrent.thread
+import java.util.Date
 
 object BackupUtils {
-    private var restoreFileSelector: ActivityResultLauncher<Array<String>>? = null
-
     // Kinda hack, but I couldn't think of a better way
     data class BackupVars(
         @JsonProperty("_Bool") val _Bool: Map<String, Boolean>?,
@@ -49,49 +35,45 @@ object BackupUtils {
         @JsonProperty("settings") val settings: BackupVars
     )
 
-    fun setupStream(context: Context, displayName : String, ext : String, subDir : SafeFile?) : OutputStream? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { // && subDir?.isDownloadDir() == true
-            val cr = context.contentResolver
-            val contentUri =
-                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY) // USE INSTEAD OF MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            //val currentMimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
-
-            val newFile = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                put(MediaStore.MediaColumns.TITLE, displayName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                //put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
-            }
-
-            val newFileUri = cr.insert(
-                contentUri,
-                newFile
-            ) ?: throw IOException("Error creating file uri")
-            cr.openOutputStream(newFileUri, "w")
-                ?: throw IOException("Error opening stream")
-        } else {
-            val fileName = "$displayName.$ext"
-            val rFile = subDir?.findFile(fileName)
-            if (rFile?.exists() == true) {
-                rFile.delete()
-            }
-            val file =
-                subDir?.createFile(fileName)
-                    ?: throw IOException("Error creating file")
-            if (file.exists() != true) throw IOException("File does not exist")
-            file.openOutputStream()
+    private fun <T> Context.restoreMap(
+        map: Map<String, T>?,
+        isEditingAppSettings: Boolean = false
+    ) {
+        val editor = DataStore.editor(this, isEditingAppSettings)
+        map?.forEach {
+            editor.setKeyRaw(it.key, it.value)
         }
+        editor.apply()
     }
 
-    fun FragmentActivity.backup() {
-        try {
-            if (checkWrite()) {
-                val subDir = SettingsFragment.getDefaultDir(context = this)//getBasePath().first
+    suspend fun restoreFromUri(context: Context, uri: Uri): Result<Unit> =
+        withContext(Dispatchers.Default) {
+            runCatching {
+                val restoredValue =
+                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                        mapper.readValue<BackupFile>(inputStream)
+                    } ?: return@runCatching
+                restore(
+                    context,
+                    restoredValue,
+                    restoreSettings = true,
+                    restoreDataStore = true
+                )
+            }
+        }
+
+    suspend fun createBackupFile(context: Context, activity: Activity?): Result<String> =
+        withContext(Dispatchers.Default) {
+            runCatching {
+                if (!context.checkWrite()) {
+                    activity?.requestRW()
+                    throw ErrorLoadingException()
+                }
                 val date = SimpleDateFormat("yyyy_MM_dd_HH_mm").format(Date(currentTimeMillis()))
                 val displayName = "QN_Backup_${date}"
 
-                val allData = getSharedPrefs().all
-                val allSettings = getDefaultSharedPrefs().all
+                val allData = context.getSharedPrefs().all
+                val allSettings = context.getDefaultSharedPrefs().all
 
                 val allDataSorted = BackupVars(
                     allData.filter { it.value is Boolean } as? Map<String, Boolean>,
@@ -115,129 +97,43 @@ object BackupUtils {
                     allDataSorted,
                     allSettingsSorted
                 )
-                val steam = setupStream(this,displayName,"json", subDir)
 
-                val printStream = PrintWriter(steam)
-                printStream.print(mapper.writeValueAsString(backupFile))
-                printStream.close()
+                val file = FileHelper.backup.createFile(context, displayName)
+                    ?: throw ErrorLoadingException("Unable to create file")
+                val stream = file.openOutputStream(append = false)
+                    ?: throw ErrorLoadingException("Unable to create stream")
 
-                showToast(
-                    R.string.backup_success,
-                    Toast.LENGTH_LONG
-                )
-            } else {
-                showToast(getString(R.string.backup_failed), Toast.LENGTH_LONG)
-                requestRW()
-                return
-            }
-        } catch (e: Exception) {
-            logError(e)
-            try {
-                showToast(
-                    getString(R.string.backup_failed_error_format).format(e.toString()),
-                    Toast.LENGTH_LONG
-                )
-            } catch (e: Exception) {
-                logError(e)
-            }
-        }
-    }
-
-    fun FragmentActivity.setUpBackup() {
-        try {
-            restoreFileSelector =
-                registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-                    this.let { activity ->
-                        uri?.let {
-                            try {
-                                val input =
-                                    activity.contentResolver.openInputStream(uri)
-                                        ?: return@registerForActivityResult
-
-                                val restoredValue =
-                                    mapper.readValue<BackupFile>(input)
-
-                                thread {
-                                    activity.restore(
-                                        restoredValue,
-                                        restoreSettings = true,
-                                        restoreDataStore = true
-                                    )
-                                    activity.runOnUiThread {
-                                        activity.recreate()
-                                    }
-                                }
-                                input.close()
-                            } catch (e: Exception) {
-                                logError(e)
-                                try { // smth can fail in .format
-                                    showToast(
-                                        getString(R.string.restore_failed_format).format(e.toString())
-                                    )
-                                } catch (e: Exception) {
-                                    logError(e)
-                                }
-                            }
-                        }
-                    }
+                stream.use { stream ->
+                    mapper.writeValue(stream, backupFile)
                 }
-        } catch (e: Exception) {
-            logError(e)
-        }
-    }
-
-    fun FragmentActivity.restorePrompt() {
-        runOnUiThread {
-            try {
-                restoreFileSelector?.launch(
-                    arrayOf(
-                        "text/plain",
-                        "text/str",
-                        "text/x-unknown",
-                        "application/json",
-                        "unknown/unknown",
-                        "content/unknown",
-                    )
-                )
-            } catch (e: Exception) {
-                showToast(e.message)
-                logError(e)
+                file.absolutePath ?: file.uri.toString()
             }
         }
-    }
 
-    private fun <T> Context.restoreMap(
-        map: Map<String, T>?,
-        isEditingAppSettings: Boolean = false
-    ) {
-        val editor = DataStore.editor(this, isEditingAppSettings)
-        map?.forEach {
-            editor.setKeyRaw(it.key, it.value)
-        }
-        editor.apply()
-    }
-
-    fun Context.restore(
+    fun restore(
+        context: Context,
         backupFile: BackupFile,
         restoreSettings: Boolean,
         restoreDataStore: Boolean
     ) {
-        if (restoreSettings) {
-            restoreMap(backupFile.settings._Bool, true)
-            restoreMap(backupFile.settings._Int, true)
-            restoreMap(backupFile.settings._String, true)
-            restoreMap(backupFile.settings._Float, true)
-            restoreMap(backupFile.settings._Long, true)
-            restoreMap(backupFile.settings._StringSet, true)
-        }
+        context.apply {
+            if (restoreSettings) {
+                restoreMap(backupFile.settings._Bool, true)
+                restoreMap(backupFile.settings._Int, true)
+                restoreMap(backupFile.settings._String, true)
+                restoreMap(backupFile.settings._Float, true)
+                restoreMap(backupFile.settings._Long, true)
+                restoreMap(backupFile.settings._StringSet, true)
+            }
 
-        if (restoreDataStore) {
-            restoreMap(backupFile.datastore._Bool)
-            restoreMap(backupFile.datastore._Int)
-            restoreMap(backupFile.datastore._String)
-            restoreMap(backupFile.datastore._Float)
-            restoreMap(backupFile.datastore._Long)
-            restoreMap(backupFile.datastore._StringSet)
+            if (restoreDataStore) {
+                restoreMap(backupFile.datastore._Bool)
+                restoreMap(backupFile.datastore._Int)
+                restoreMap(backupFile.datastore._String)
+                restoreMap(backupFile.datastore._Float)
+                restoreMap(backupFile.datastore._Long)
+                restoreMap(backupFile.datastore._StringSet)
+            }
         }
     }
 }

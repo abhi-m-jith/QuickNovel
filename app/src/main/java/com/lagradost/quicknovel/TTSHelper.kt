@@ -21,16 +21,17 @@ import com.lagradost.quicknovel.receivers.BecomingNoisyReceiver
 import com.lagradost.quicknovel.ui.UiText
 import com.lagradost.quicknovel.ui.txt
 import com.lagradost.quicknovel.util.UIHelper.requestAudioFocus
+import com.lagradost.quicknovel.util.UIHelper.unRequestAudioFocus
 import io.noties.markwon.Markwon
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.jsoup.Jsoup
 import java.util.Locale
 import java.util.Stack
 import kotlin.math.roundToInt
+import kotlin.text.replace
 
 
 class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boolean) {
@@ -60,10 +61,10 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
     private var TTSStartSpeakId = 0
     private var TTSEndSpeakId = 0
 
-    private var speed : Float = 1.0f
-    private var pitch : Float = 1.0f
+    private var speed: Float = 1.0f
+    private var pitch: Float = 1.0f
 
-    fun isValidTTS() : Boolean {
+    fun isValidTTS(): Boolean {
         return tts != null
     }
 
@@ -72,12 +73,12 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
         TTSQueue = null
     }
 
-    fun setSpeed(speed : Float) {
+    fun setSpeed(speed: Float) {
         this.speed = speed
         tts?.setSpeechRate(speed)
     }
 
-    fun setPitch(pitch : Float) {
+    fun setPitch(pitch: Float) {
         this.pitch = pitch
         tts?.setPitch(pitch)
     }
@@ -117,24 +118,23 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
         next: TTSHelper.TTSLine?,
         action: () -> Boolean
     ): Int? {
-        return requireTTS({ tts ->
-            val ret: Int
-            val queue = TTSQueue
-            ret = if (queue?.first == line) {
-                queue.second
-            } else {
-                TTSQueueId++
-                tts.speak(line.speakOutMsg, TextToSpeech.QUEUE_FLUSH, null, TTSQueueId.toString())
-                TTSQueueId
-            }
+        val tts = requireTTS(action) ?: return null
 
-            if (next != null) {
-                TTSQueueId++
-                TTSQueue = next to TTSQueueId
-                tts.speak(next.speakOutMsg, TextToSpeech.QUEUE_ADD, null, TTSQueueId.toString())
-            }
-            ret
-        }, action)
+        val queue = TTSQueue
+        val ret = if (queue?.first == line) {
+            queue.second
+        } else {
+            TTSQueueId++
+            tts.speak(line.speakOutMsg, TextToSpeech.QUEUE_FLUSH, null, TTSQueueId.toString())
+            TTSQueueId
+        }
+
+        if (next != null) {
+            TTSQueueId++
+            TTSQueue = next to TTSQueueId
+            tts.speak(next.speakOutMsg, TextToSpeech.QUEUE_ADD, null, TTSQueueId.toString())
+        }
+        return ret
     }
 
     /** waits for sentence to be finished or action to be true, if action is true then
@@ -152,110 +152,117 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
     }
 
     private val mutex: Mutex = Mutex() // no duplicate tts
-    suspend fun <T> requireTTS(callback: (TextToSpeech) -> T, action: () -> Boolean): T? =
-        mutex.withLock {
-            coroutineScope {
-                return@coroutineScope tts?.let(callback) ?: run {
-                    var waiting = true
-                    var success = false
-                    val pendingTTS = TextToSpeech(context) { status ->
-                        success = status == TextToSpeech.SUCCESS
-                        waiting = false
-                        if (status == TextToSpeech.SUCCESS) {
-                            return@TextToSpeech
-                        }
-                        val errorMSG = when (status) {
-                            TextToSpeech.ERROR -> "ERROR"
-                            TextToSpeech.ERROR_INVALID_REQUEST -> "ERROR_INVALID_REQUEST"
-                            TextToSpeech.ERROR_NETWORK -> "ERROR_NETWORK"
-                            TextToSpeech.ERROR_NETWORK_TIMEOUT -> "ERROR_NETWORK_TIMEOUT"
-                            TextToSpeech.ERROR_NOT_INSTALLED_YET -> "ERROR_NOT_INSTALLED_YET"
-                            TextToSpeech.ERROR_OUTPUT -> "ERROR_OUTPUT"
-                            TextToSpeech.ERROR_SYNTHESIS -> "ERROR_SYNTHESIS"
-                            TextToSpeech.ERROR_SERVICE -> "ERROR_SERVICE"
-                            else -> status.toString()
-                        }
 
-                        CommonActivity.showToast("Initialization Failed! Error $errorMSG")
-                        return@TextToSpeech
-                    }
-
-                    while (waiting && isActive) {
-                        if (action()) {
-                            return@coroutineScope null
-                        }
-                        delay(100)
-                    }
-
-                    if (!success) return@coroutineScope null
-
-                    val voiceName = BaseApplication.getKey<String>(EPUB_VOICE)
-                    val langName = BaseApplication.getKey<String>(EPUB_LANG)
-
-                    val canSetLanguage = pendingTTS.setLanguage(
-                        pendingTTS.availableLanguages.firstOrNull { it.displayName == langName }
-                            ?: Locale.US)
-                    pendingTTS.voice =
-                        pendingTTS.voices.firstOrNull { it.name == voiceName }
-                            ?: pendingTTS.defaultVoice
-
-                    if (canSetLanguage == TextToSpeech.LANG_MISSING_DATA || canSetLanguage == TextToSpeech.LANG_NOT_SUPPORTED) {
-                        CommonActivity.showToast("Unable to initialize TTS, download the language")
-                        return@coroutineScope null
-                    }
-
-                    pendingTTS.setOnUtteranceProgressListener(object :
-                        UtteranceProgressListener() {
-                        //MIGHT BE INTERESTING https://stackoverflow.com/questions/44461533/android-o-new-texttospeech-onrangestart-callback
-                        override fun onDone(utteranceId: String) {
-                            utteranceId.toIntOrNull()?.let { id ->
-                                TTSEndSpeakId = maxOf(TTSEndSpeakId, id)
-                            }
-                        }
-
-                        @Deprecated("Deprecated")
-                        override fun onError(utteranceId: String?) {
-                            utteranceId?.toIntOrNull()?.let { id ->
-                                TTSEndSpeakId = maxOf(TTSEndSpeakId, id)
-                            }
-                        }
-
-                        override fun onError(utteranceId: String?, errorCode: Int) {
-                            utteranceId?.toIntOrNull()?.let { id ->
-                                TTSEndSpeakId = maxOf(TTSEndSpeakId, id)
-                            }
-                        }
-
-                        override fun onStart(utteranceId: String) {
-                            utteranceId.toIntOrNull()?.let { id ->
-                                TTSStartSpeakId = maxOf(TTSStartSpeakId, id)
-                            }
-                        }
-                    })
-
-                    pendingTTS.setPitch(pitch)
-                    pendingTTS.setSpeechRate(speed)
-
-                    tts = pendingTTS
-                    tts?.let(callback)
-                }
+    suspend fun requireTTS(action: () -> Boolean = { false }): TextToSpeech? = with(mutex) {
+        coroutineScope {
+            val currentTTS = tts
+            if (currentTTS != null) {
+                return@coroutineScope currentTTS
             }
+
+            var waiting = true
+            var success = false
+            // Fucking retarded leak, we have to use applicationContext
+            val pendingTTS = TextToSpeech(context.applicationContext) { status ->
+                success = status == TextToSpeech.SUCCESS
+                waiting = false
+                if (status == TextToSpeech.SUCCESS) {
+                    return@TextToSpeech
+                }
+                val errorMSG = when (status) {
+                    TextToSpeech.ERROR -> "ERROR"
+                    TextToSpeech.ERROR_INVALID_REQUEST -> "ERROR_INVALID_REQUEST"
+                    TextToSpeech.ERROR_NETWORK -> "ERROR_NETWORK"
+                    TextToSpeech.ERROR_NETWORK_TIMEOUT -> "ERROR_NETWORK_TIMEOUT"
+                    TextToSpeech.ERROR_NOT_INSTALLED_YET -> "ERROR_NOT_INSTALLED_YET"
+                    TextToSpeech.ERROR_OUTPUT -> "ERROR_OUTPUT"
+                    TextToSpeech.ERROR_SYNTHESIS -> "ERROR_SYNTHESIS"
+                    TextToSpeech.ERROR_SERVICE -> "ERROR_SERVICE"
+                    else -> status.toString()
+                }
+
+                CommonActivity.showToast("Initialization Failed! Error $errorMSG")
+                return@TextToSpeech
+            }
+
+            while (waiting && isActive) {
+                if (action()) {
+                    return@coroutineScope null
+                }
+                delay(100)
+            }
+
+            if (!success) return@coroutineScope null
+
+            val voiceName = BaseApplication.getKey<String>(EPUB_VOICE)
+            val langName = BaseApplication.getKey<String>(EPUB_LANG)
+
+            val canSetLanguage = pendingTTS.setLanguage(
+                pendingTTS.availableLanguages.firstOrNull { it.displayName == langName }
+                    ?: Locale.US)
+            pendingTTS.voice =
+                pendingTTS.voices.firstOrNull { it.name == voiceName }
+                    ?: pendingTTS.defaultVoice
+
+            if (canSetLanguage == TextToSpeech.LANG_MISSING_DATA || canSetLanguage == TextToSpeech.LANG_NOT_SUPPORTED) {
+                CommonActivity.showToast(R.string.tts_language_error)
+                pendingTTS.shutdown()
+                return@coroutineScope null
+            }
+
+            pendingTTS.setOnUtteranceProgressListener(object :
+                UtteranceProgressListener() {
+                //MIGHT BE INTERESTING https://stackoverflow.com/questions/44461533/android-o-new-texttospeech-onrangestart-callback
+                override fun onDone(utteranceId: String) {
+                    utteranceId.toIntOrNull()?.let { id ->
+                        TTSEndSpeakId = maxOf(TTSEndSpeakId, id)
+                    }
+                }
+
+                @Deprecated("Deprecated")
+                override fun onError(utteranceId: String?) {
+                    utteranceId?.toIntOrNull()?.let { id ->
+                        TTSEndSpeakId = maxOf(TTSEndSpeakId, id)
+                    }
+                }
+
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    utteranceId?.toIntOrNull()?.let { id ->
+                        TTSEndSpeakId = maxOf(TTSEndSpeakId, id)
+                    }
+                }
+
+                override fun onStart(utteranceId: String) {
+                    utteranceId.toIntOrNull()?.let { id ->
+                        TTSStartSpeakId = maxOf(TTSStartSpeakId, id)
+                    }
+                }
+            })
+
+            pendingTTS.setPitch(pitch)
+            pendingTTS.setSpeechRate(speed)
+
+            tts = pendingTTS
+            return@coroutineScope pendingTTS
         }
+    }
 
 
     fun register() {
         if (isRegistered) return
         isRegistered = true
         context.registerReceiver(myNoisyAudioStreamReceiver, intentFilter)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.requestAudioFocus(focusRequest)
-        }
+        context.requestAudioFocus(focusRequest)
     }
 
     fun release() {
-        tts?.stop()
-        tts?.shutdown()
+        tts?.apply {
+            stop()
+            setOnUtteranceProgressListener(null) // Fucking retarded leak
+            shutdown()
+        }
         tts = null
+        TTSQueue = null
 
         unregister()
     }
@@ -264,6 +271,7 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
         if (!isRegistered) return
         isRegistered = false
         context.unregisterReceiver(myNoisyAudioStreamReceiver)
+        context.unRequestAudioFocus(focusRequest)
     }
 
     init {
@@ -365,7 +373,11 @@ data class LoadingSpanned(val url: String?, override val index: Int) : SpanDispl
     val text get() = url?.let { txt(R.string.loading_format, it) } ?: txt(R.string.loading)
 }
 
-data class FailedSpanned(val reason: UiText, override val index: Int, val canReload: Boolean) :
+data class FailedSpanned(
+    val reason: UiText,
+    override val index: Int,
+    val cause: Throwable?
+) :
     SpanDisplay() {
     override val innerIndex: Int = 0
     override fun id(): Long {
@@ -539,14 +551,25 @@ object TTSHelper {
         return loc
     }
 
-    fun preParseHtml(text: String, authorNotes : Boolean): String {
+    fun preParseHtml(text: String, authorNotes: Boolean): String {
         val document = Jsoup.parse(text)
 
         // REMOVE USELESS STUFF THAT WONT BE USED IN A NORMAL TXT
         document.select("style").remove()
         document.select("script").remove()
+        document.select("img").removeAttr("alt")
+        //This is for poorly generated epubs
+        val titleElement = document.selectFirst("title")
+        if (titleElement != null) {
+            val titleText = titleElement.text().trim()
+            //Poorly generated epubs often have the location of their HTML as the title. They look very ugly, so I remove them
+            val pathRegex = Regex("^(/|[a-zA-Z]:[\\\\/]).*")
+            if (pathRegex.matches(titleText)) {
+                titleElement.remove()
+            }
+        }
 
-        if(!authorNotes) {
+        if (!authorNotes) {
             document.select("div.qnauthornotecontainer").remove()
         }
 
@@ -589,18 +612,23 @@ object TTSHelper {
         return parseSpan(render, index)
     }
 
-    private fun isValidSpeakOutMsg(msg: String): Boolean {
-        return msg.isNotEmpty() && msg.isNotBlank() && msg.contains("[A-z0-9]".toRegex())
-    }
+    private fun isValidSpeakOutMsg(msg: String): Boolean = msg.any { it.isLetter() }
+    private val replaceWithSpaceChars =
+        Regex("[-<>_^«»「」—–¿*~【】〈〉❬❭〈〉❰❱《》〚〛⟦⟧〘〙❲❳❴❵\\[\\]\u200C]")
+    private val endAt = Regex("[.\n;?:!‽।॥]")
+    private val startAt =
+        Regex("[^-<>_^/\\\\|()«»「」—–¿*~【】〈〉❬❭〈〉❰❱《》〚〛⟦⟧〘〙❲❳❴❵\\[\\]\u200C .\n\"'’‘“”…,]")
+    private val prePassRegex = arrayOf(
+        "\\.([A-z])".toRegex() to ",$1",
+        "([.:])([0-9])".toRegex() to ",$2",
+        "(^|[ \"“‘'])(Dr|Mr|Mrs)\\. ([A-Z])".toRegex() to "$1$2, $3"
+    )
 
     fun ttsParseText(text: String, tag: Int): ArrayList<TTSLine> {
-        val cleanText = text
-            .replace("\\.([A-z])".toRegex(), ",$1")//\.([A-z]) \.([^-\s])
-            .replace("([.:])([0-9])".toRegex(), ",$2") // GOOD FOR DECIMALS
-            .replace(
-                "(^|[ \"“‘'])(Dr|Mr|Mrs)\\. ([A-Z])".toRegex(),
-                "$1$2, $3"
-            )
+        var cleanText = text
+        for ((regex, replacement) in prePassRegex) {
+            cleanText = text.replace(regex, replacement)
+        }
 
         //println("SIZE: ${text.length}")
 
@@ -609,97 +637,35 @@ object TTSHelper {
         }
 
         val ttsLines = ArrayList<TTSLine>()
-
-
-        val invalidStartChars =
-            arrayOf(
-                ' ', '.', ',', '\n', '\"',
-                '\'', '’', '‘', '“', '”', '«', '»', '「', '」', '…', '[', ']'
-            )
-        val endingCharacters = arrayOf(".", "\n", ";", "?", ":")
         var index = 0
         while (true) {
+            index = startAt.find(cleanText, index)?.range?.last ?: Int.MAX_VALUE
             if (index >= text.length) {
                 break
             }
-            while (invalidStartChars.contains(text[index])) {
-                index++
-                if (index >= text.length) {
-                    break
-                }
-            }
-
-            var endIndex = Int.MAX_VALUE
-            for (a in endingCharacters) {
-                val indexEnd = cleanText.indexOf(a, index)
-
-                if (indexEnd == -1) continue
-
-                if (indexEnd < endIndex) {
-                    endIndex = indexEnd + 1
-                }
-            }
-
+            var endIndex =
+                endAt.find(cleanText, index)?.range?.last?.plus(1)
+                /** +1 for inclusive as substring is [start, end) */
+                    ?: Int.MAX_VALUE
 
             if (endIndex > text.length) {
                 endIndex = text.length
             }
-            if (index >= text.length) {
-                break
-            }
-
-            val invalidEndChars =
-                arrayOf('\n')
-            while (true) {
-                var containsInvalidEndChar = false
-                for (a in invalidEndChars) {
-                    if (endIndex <= 0 || endIndex > text.length) break
-                    if (text[endIndex - 1] == a) {
-                        containsInvalidEndChar = true
-                        endIndex--
-                    }
-                }
-                if (!containsInvalidEndChar) {
-                    break
-                }
-            }
 
             try {
                 // THIS PART IF FOR THE SPEAK PART, REMOVING STUFF THAT IS WACK
-                val message = text.substring(index, endIndex)
-                var msg = message
-                val invalidChars =
-                    arrayOf(
-                        "-",
-                        "<",
-                        ">",
-                        "_",
-                        "^",
-                        "«",
-                        "»",
-                        "「",
-                        "」",
-                        "—",
-                        "–",
-                        "¿",
-                        "*",
-                        "~",
-                        "\u200c" // Zero width joiner
-                    ) // "\'", //Don't ect
-                for (c in invalidChars) {
-                    msg = msg.replace(c, " ")
-                }
+                var msg = text.substring(index, endIndex)
+                val oldLength = msg.length
+                msg = msg.trimEnd()
+                val newLength = msg.length
+                val trimLength = oldLength - newLength
+
+                msg = msg.replace(replaceWithSpaceChars, " ")
                 msg = msg.replace("...", " ")
-                if (msg
-                        .replace("\n", "")
-                        .replace("\t", "")
-                        .replace(".", "").isNotEmpty()
-                ) {
-                    if (isValidSpeakOutMsg(msg)) {
-                        ttsLines.add(TTSLine(msg, index, endIndex, index = tag))
-                    }
+                if (isValidSpeakOutMsg(msg)) {
+                    ttsLines.add(TTSLine(msg, index, endIndex - trimLength, index = tag))
                 }
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 break
             }
             index = endIndex

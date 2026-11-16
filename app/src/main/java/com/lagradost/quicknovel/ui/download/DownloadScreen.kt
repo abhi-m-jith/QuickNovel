@@ -1,0 +1,554 @@
+package com.lagradost.quicknovel.ui.download
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lagradost.cloudstream4.compose.ActionDialog
+import com.lagradost.cloudstream4.compose.Screen
+import com.lagradost.cloudstream4.compose.SinglePairSelectDialog
+import com.lagradost.cloudstream4.compose.rounded
+import com.lagradost.cloudstream4.rememberAppSettings
+import com.lagradost.cloudstream4.theme.CloudStreamPreviewTheme
+import com.lagradost.quicknovel.MainActivity
+import com.lagradost.quicknovel.R
+import com.lagradost.quicknovel.compose.BaseSearchBar
+import com.lagradost.quicknovel.compose.IsScrolling
+import com.lagradost.quicknovel.ui.common.HorizontalTab
+import com.lagradost.quicknovel.ui.common.ImmutableSearchList
+import com.lagradost.quicknovel.ui.common.SearchList
+import com.lagradost.quicknovel.ui.common.SearchResponseAction
+import com.lagradost.quicknovel.ui.common.SearchResponseOperation
+import com.lagradost.quicknovel.ui.common.SortingMethodPair
+import com.lagradost.quicknovel.ui.common.SortingMethodType
+import com.lagradost.quicknovel.ui.common.normalSortingMethods
+import com.lagradost.quicknovel.ui.common.sortingMethods
+import com.mihon.material.padding
+import com.mihon.presentation.settings.collectAsState
+import kotlinx.collections.immutable.PersistentList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
+
+object DownloadScreen : Screen {
+    @Composable
+    override fun Content() {
+        val settings = rememberAppSettings()
+        val viewModel = viewModel<DownloadViewModel2> { DownloadViewModel2(settings) }
+        val state by viewModel.state.collectAsStateWithLifecycle()
+        DownloadScreen(state, viewModel::onAction)
+    }
+}
+
+@Composable
+fun DownloadScreen(
+    state: DownloadPageState,
+    onAction: (DownloadPageAction) -> Unit
+) {
+    DownloadSort(
+        downloadSortingMethod = state.downloadSortingMethod,
+        regularSortingMethod = state.bookmarkSortingMethod,
+        sortingMethodDialog = state.dialog,
+        onAction = onAction
+    )
+
+    val pagesNames = persistentListOf(
+        R.string.tab_downloads,
+        R.string.type_reading,
+        R.string.type_on_hold,
+        R.string.type_plan_to_read,
+        R.string.type_completed,
+        R.string.type_dropped,
+    )
+
+    val store = rememberAppSettings()
+
+    val downloadIsRow = store.downloads.isRow
+    val downloadIsRowState by downloadIsRow.collectAsState()
+
+    var fabExpanded by remember { mutableStateOf(false) }
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(snapAnimationSpec = null)
+    Scaffold(
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                modifier = Modifier.padding(bottom = 40.dp),
+                onClick = {
+                    onAction(DownloadPageAction.ShowSorting)
+                },
+                // Elevation actually changes the color, because who wanted a sane framework
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 0.dp,
+                    pressedElevation = 0.dp,
+                    focusedElevation = 0.dp,
+                    hoveredElevation = 0.dp
+                ),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                text = {
+                    Text(stringResource(R.string.filter_dialog_sort_by))
+                },
+                icon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_sort_24dp),
+                        contentDescription = stringResource(R.string.filter_dialog_sort_by)
+                    )
+                },
+                expanded = fabExpanded
+            )
+        },
+        topBar = {
+            BaseSearchBar(
+                content = {
+                    Spacer(modifier = Modifier.height(5.dp))
+                },
+                onQueryChange = { query ->
+                    onAction(DownloadPageAction.Search(query))
+                },
+                onSearch = { query ->
+                    onAction(DownloadPageAction.Search(query))
+                },
+                scrollBehavior = scrollBehavior,
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.search_icon),
+                        contentDescription = stringResource(R.string.search),
+                        modifier = Modifier.size(24.dp)
+                    )
+                },
+                trailingIcon = {
+                    Row {
+                        var expanded by remember { mutableStateOf(false) }
+
+                        IconButton(onClick = {
+                            expanded = true
+                        }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_baseline_add_24),
+                                contentDescription = stringResource(R.string.import_epub),
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.import_epub)) },
+                                onClick = {
+                                    expanded = false
+                                    MainActivity.importEpub()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.import_epubs)) },
+                                onClick = {
+                                    expanded = false
+                                    MainActivity.importEpubs()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.refresh)) },
+                                onClick = {
+                                    expanded = false
+                                    onAction(DownloadPageAction.Refresh)
+                                }
+                            )
+                        }
+
+                        IconButton(onClick = {
+                            downloadIsRow.set(!downloadIsRowState)
+                        }) {
+                            Icon(
+                                painter = painterResource(if (downloadIsRowState) R.drawable.ic_baseline_grid_view_24 else R.drawable.ic_baseline_list_24),
+                                contentDescription = stringResource(if (downloadIsRowState) R.string.grid_view else R.string.list_view),
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                    }
+                },
+                placeholder = stringResource(R.string.search_downloads)
+            )
+        }, modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection)
+    ) { innerPadding ->
+        if (state.pages.isEmpty()) return@Scaffold
+
+        val pagerState = rememberPagerState(
+            initialPage = state.activePage.coerceIn(0, pagesNames.size - 1),
+            pageCount = { pagesNames.size }
+        )
+
+        val currentPage = pagerState.currentPage
+        LaunchedEffect(currentPage) {
+            onAction(DownloadPageAction.SelectPage(currentPage))
+        }
+
+        Column {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // This fixes the double padding from the bottom nav bar
+                    .padding(
+                        start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
+                        end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
+                        top = innerPadding.calculateTopPadding()
+                    )
+                    .weight(1.0f)
+            ) { page ->
+                DownloadRow(
+                    isRow = downloadIsRowState,
+                    page,
+                    state.pages.getOrNull(page) ?: ImmutableSearchList(),
+                    onAction,
+                    scrollingChange = { isScrollingUp ->
+                        fabExpanded = isScrollingUp
+                    })
+            }
+
+            HorizontalTab(
+                pagerState,
+                pagesNames,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun DownloadSort(
+    downloadSortingMethod: SortingMethodType,
+    regularSortingMethod: SortingMethodType,
+    sortingMethodDialog: DownloadDialog?,
+    onAction: (DownloadPageAction) -> Unit,
+) {
+    when (sortingMethodDialog) {
+        is DownloadDialog.DeleteBookmark -> {
+            ActionDialog(
+                title = stringResource(R.string.remove),
+                text = stringResource(
+                    R.string.remove_from_bookmarks_format,
+                    sortingMethodDialog.item.name
+                ),
+                confirmText = stringResource(R.string.remove),
+                dismissText = stringResource(R.string.cancel),
+                dismiss = {
+                    onAction(DownloadPageAction.DismissDialog)
+                },
+                confirm = {
+                    onAction(DownloadPageAction.DismissDialog)
+                    onAction(
+                        DownloadPageAction.ResultAction(
+                            SearchResponseAction(
+                                sortingMethodDialog.item,
+                                SearchResponseOperation.Delete
+                            )
+                        )
+                    )
+                }
+            )
+        }
+
+        is DownloadDialog.DeleteItem -> {
+            ActionDialog(
+                title = stringResource(R.string.delete),
+                text = stringResource(
+                    R.string.permanently_delete_format,
+                    sortingMethodDialog.item.name
+                ),
+                confirmText = stringResource(R.string.delete),
+                dismissText = stringResource(R.string.cancel),
+                dismiss = {
+                    onAction(DownloadPageAction.DismissDialog)
+                },
+                confirm = {
+                    onAction(DownloadPageAction.DismissDialog)
+                    onAction(
+                        DownloadPageAction.ResultAction(
+                            SearchResponseAction(
+                                sortingMethodDialog.item,
+                                SearchResponseOperation.Delete
+                            )
+                        )
+                    )
+                }
+            )
+        }
+
+        DownloadDialog.SortBookmarks -> {
+            SortDialog(
+                items = normalSortingMethods,
+                sortingMethod = regularSortingMethod,
+                dismiss = {
+                    onAction(DownloadPageAction.DismissDialog)
+                },
+                select = { key ->
+                    onAction(DownloadPageAction.DismissDialog)
+                    onAction(DownloadPageAction.SelectSortingMethod(regularSortingMethod = key))
+                })
+        }
+
+        DownloadDialog.SortDownloads -> {
+            SortDialog(items = sortingMethods, sortingMethod = downloadSortingMethod, dismiss = {
+                onAction(DownloadPageAction.DismissDialog)
+            }, select = { key ->
+                onAction(DownloadPageAction.DismissDialog)
+                onAction(DownloadPageAction.SelectSortingMethod(downloadSortingMethod = key))
+            })
+        }
+
+        null -> {
+            // No dialog shown
+        }
+    }
+
+    /*val data = if (sortingMethodDialog) {
+        sortingMethods
+    } else {
+        normalSortingMethods
+    }
+    val key = if (sortingMethodDialog) {
+        downloadSortingMethod
+    } else {
+        regularSortingMethod
+    }
+
+    SinglePairSelectDialog(
+        entries = data.associate { (it.id to it.inverse) to stringResource(it.name) },
+        selectedKey = key,
+        title = stringResource(R.string.filter_dialog_sort_by),
+        confirmText = stringResource(R.string.sort_apply),
+        dismissText = stringResource(R.string.sort_cancel),
+        dismiss = {
+            action(DownloadPageAction.DismissDialog)
+        },
+        confirm = { key ->
+            if (sortingMethodDialog) {
+                action(DownloadPageAction.SelectSortingMethod(downloadSortingMethod = key))
+            } else {
+                action(DownloadPageAction.SelectSortingMethod(regularSortingMethod = key))
+            }
+            action(DownloadPageAction.DismissDialog)
+        }
+    )*/
+}
+
+@Composable
+fun SortDialog(
+    items: PersistentList<SortingMethodPair>,
+    sortingMethod: SortingMethodType,
+    dismiss: () -> Unit,
+    select: (SortingMethodType) -> Unit,
+) {
+    SinglePairSelectDialog(
+        entries = items.associate { (it.id to it.inverse) to stringResource(it.name) },
+        selectedKey = sortingMethod,
+        title = stringResource(R.string.filter_dialog_sort_by),
+        confirmText = stringResource(R.string.sort_apply),
+        dismissText = stringResource(R.string.sort_cancel),
+        dismiss = dismiss,
+        confirm = select
+    )
+}
+
+@Composable
+fun DownloadRow(
+    isRow: Boolean,
+    index: Int,
+    row: ImmutableSearchList?,
+    onAction: (DownloadPageAction) -> Unit,
+    scrollingChange: (Boolean) -> Unit
+) {
+    if (row == null) return
+
+    val searchAction = remember<(SearchResponseAction) -> Unit>(onAction) {
+        { item ->
+            onAction(DownloadPageAction.ResultAction(item))
+        }
+    }
+    var refreshing by remember { mutableStateOf(false) }
+    val lazyGridState: LazyGridState = rememberLazyGridState()
+    lazyGridState.IsScrolling(up = {
+        scrollingChange(true)
+    }, down = {
+        scrollingChange(false)
+    })
+
+    val scope = rememberCoroutineScope()
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            refreshing = true
+            onAction(DownloadPageAction.Refresh)
+            scope.launch {
+                delay(200.milliseconds)
+                refreshing = false
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    ) {
+        SearchList(
+            isRow = isRow,
+            state = row,
+            searchAction = searchAction,
+            modifier = Modifier,
+            lazyGridState = lazyGridState,
+            footer = if (index == 0) {
+                if (isRow) {
+                    ::RowFooter
+                } else {
+                    ::BoxFooter
+                }
+            } else {
+                null
+            }
+        )
+    }
+}
+
+@Composable
+fun RowFooter() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(100.dp)
+            .rounded()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable(
+                onClick = {
+                    MainActivity.importEpub()
+                },
+            )
+    ) {
+        Icon(
+            modifier = Modifier.size(30.dp),
+            painter = painterResource(R.drawable.ic_baseline_add_24),
+            contentDescription = stringResource(R.string.import_epub),
+            tint = MaterialTheme.colorScheme.onBackground
+        )
+
+        Text(
+            modifier = Modifier.padding(start = 15.dp),
+            text = stringResource(R.string.import_epub),
+            color = MaterialTheme.colorScheme.onBackground,
+            fontSize = 13.sp,
+            lineHeight = 14.sp,
+            maxLines = 2,
+            textAlign = TextAlign.Center,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun BoxFooter() {
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .combinedClickable(interactionSource = interactionSource, indication = null, onClick = {
+                MainActivity.importEpub()
+            })
+            .rounded()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.68f)
+                .rounded()
+                .indication(interactionSource = interactionSource, indication = ripple()),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                modifier = Modifier.size(40.dp),
+                painter = painterResource(R.drawable.ic_baseline_add_24),
+                contentDescription = stringResource(R.string.import_epub),
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(45.dp)
+                .padding(horizontal = MaterialTheme.padding.extraSmall),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = stringResource(R.string.import_epub),
+                color = MaterialTheme.colorScheme.onBackground,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                textAlign = TextAlign.Center,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+@PreviewLightDark
+fun DownloadScreenPreview() {
+    CloudStreamPreviewTheme {
+        DownloadScreen(state = DownloadPageState(), onAction = {})
+    }
+}
