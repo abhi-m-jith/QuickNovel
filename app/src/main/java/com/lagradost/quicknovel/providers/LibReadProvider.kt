@@ -2,6 +2,7 @@ package com.lagradost.quicknovel.providers
 
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.quicknovel.HeadMainPageResponse
+import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.USER_AGENT
@@ -26,10 +27,20 @@ open class LibReadAPI : FreewebnovelAPI() {
     override val rateLimitTime = 1000L
     override val orderBys = listOf(
         "Latest Release" to "latest-release",
-        "Latest Novels" to "latest-novel",
-        "Completed Novels" to "completed-novel"
+        "Latest Novels" to "latest-novels",
+        "Completed Novels" to "completed-novels"
     )
 
+    override var isChapterCountFilterNeeded=true
+
+    override fun FABFilterApplied() {
+        lastLoadedPage=1
+        seenUrls.clear()
+    }
+    override fun ResetFiltersandPage() {
+        FABFilterApplied()
+        ChapterFilter= LibraryHelper.ChapterCountFilter.ALL
+    }
 
     override fun getAcode(url: String): String =
         url.substringAfterLast("/").substringBeforeLast("-")
@@ -40,21 +51,67 @@ open class LibReadAPI : FreewebnovelAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        val url =
-            if (tag.isNullOrBlank()) "$mainUrl/sort/${orderBy ?: "latest-release"}/$page" else "$mainUrl/genre/$tag/$page"
-        val document = app.get(url).document
-        val headers = document.select("div.ul-list1.ul-list1-2.ss-custom > div.li-row")
-        val returnValue = headers.mapNotNull { h ->
-            val h3 = h.selectFirst("h3.tit > a") ?: return@mapNotNull null
-            newSearchResponse(
-                name = h3.attr("title"),
-                url = h3.attr("href") ?: return@mapNotNull null
-            ) {
-                posterUrl = fixUrlNull(h.selectFirst("div.pic > a > img")?.attr("src"))
-                latestChapter = h.select("div.item")[2].selectFirst("> div > a")?.text()
+        val collectedResults = mutableListOf<SearchResponse>()
+        var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page
+        var pagesFetched = 0 // optional safety cap
+
+        suspend fun fetchPage(pp: Int): Pair<List<SearchResponse>, Boolean> {
+            val url = if (tag.isNullOrBlank()) "$mainUrl/sort/${orderBy ?: "latest-release"}/$pp" else "$mainUrl/genre/$tag/$pp"
+            val document = app.get(url).document
+            val rawItems = document.select("div.ul-list1.ul-list1-2.ss-custom > div.li-row")
+            val isLast = rawItems.isNotEmpty()
+
+            val filtered_list=rawItems.mapNotNull { selectt ->
+                val h3 = selectt.selectFirst("h3.tit > a") ?: return@mapNotNull null
+
+                val title =h3.attr("title") ?: return@mapNotNull null
+
+                val href = h3.attr("href")
+                val chapterCount = selectt.selectFirst("div.item:nth-child(3) span.s1")
+                    ?.text()
+                    ?.substringBefore(" ")
+
+                if (!LibraryHelper.isChapterCountInRange(ChapterFilter, chapterCount.toString())) {
+                    return@mapNotNull null
+                }
+
+                // Skip duplicates across loads
+                if (!seenUrls.add(href)) {
+                    return@mapNotNull null
+                }
+
+                newSearchResponse(
+                    name = title,
+                    url = href
+                ) {
+                    posterUrl = fixUrlNull(selectt.selectFirst("div.pic > a > img")?.attr("src"))
+                    latestChapter = selectt.select("div.item")[2].selectFirst("> div > a")?.text()
+                    totalChapterCount = chapterCount
+                }
             }
+
+
+            lastLoadedPage = pp
+            return Pair(filtered_list, isLast)
         }
-        return HeadMainPageResponse(url, returnValue)
+        while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
+            val (pageResults, hadRawItems) = fetchPage(currentPage)
+
+            // If there were no raw items on this page, it's the end — break
+            if (!hadRawItems) break
+
+            // Add whatever passed the filters (could be empty) and continue to next page if needed
+            if (pageResults.isNotEmpty()) {
+                collectedResults.addAll(pageResults)
+            }
+
+            // Prepare for next iteration
+            currentPage++
+            pagesFetched++
+        }
+
+        val url = if (tag.isNullOrBlank()) "$mainUrl/sort/${orderBy ?: "latest-release"}/$lastLoadedPage" else "$mainUrl/genre/$tag/$lastLoadedPage"
+        return HeadMainPageResponse(url, collectedResults)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {

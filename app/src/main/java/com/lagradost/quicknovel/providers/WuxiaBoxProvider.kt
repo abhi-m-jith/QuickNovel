@@ -1,8 +1,12 @@
 package com.lagradost.quicknovel.providers
 
 
+import android.util.Log
 import com.lagradost.quicknovel.ChapterData
+import com.lagradost.quicknovel.CommonActivity.showToast
+import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
+import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
 import com.lagradost.quicknovel.R
@@ -12,7 +16,11 @@ import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newChapterData
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
+import com.lagradost.quicknovel.providers.WebnovelFanficAPI.Companion.MOBILE_USER_AGENT
 import com.lagradost.quicknovel.setStatus
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import org.jsoup.nodes.Document
 
 object WuxiaBoxProvider : WuxiaBoxAPI()
@@ -23,6 +31,11 @@ open class WuxiaBoxAPI : MainAPI() {
     override val iconId = R.drawable.icon_wuxiabox
     override val usesCloudFlareKiller = true
 
+    override var isChapterCountFilterNeeded=true
+    var lastLoadedPage=0
+    val minBooksNeeded=11
+    val maxPagesToFetch=10
+    val seenUrls = HashSet<String>()
     override val hasMainPage = true
 
     override val mainCategories = listOf(
@@ -92,6 +105,14 @@ open class WuxiaBoxAPI : MainAPI() {
 
     override val orderBys = listOf("New" to "newstime", "Popular" to "onclick", "Updates" to "lastdotime")
 
+    override fun FABFilterApplied() {
+        lastLoadedPage=0
+        seenUrls.clear()
+    }
+    override fun ResetFiltersandPage() {
+        FABFilterApplied()
+        ChapterFilter= LibraryHelper.ChapterCountFilter.ALL
+    }
 
     override suspend fun loadMainPage(
         page: Int,
@@ -100,26 +121,76 @@ open class WuxiaBoxAPI : MainAPI() {
         tag: String?
     ): HeadMainPageResponse
     {
-        val url = "$mainUrl/list/${tag}/${mainCategory}-${orderBy}-${page}.html"
-        val document = app.get(url, timeout = 60).document
-
-        val returnValue = document.select("li.novel-item").mapNotNull { select ->
-
-            val a = select.selectFirst("a[title]") ?: return@mapNotNull null
-            val title =
-                a.attr("title").takeIf { it.trim().isNotEmpty() }
-                    ?: a.selectFirst("h4.novel-title")
-                        ?.text() ?: return@mapNotNull null
-
-            val href = a.attr("href")
-
-            newSearchResponse(name = title, href) {
-                posterUrl = fixUrlNull(select.selectFirst("img")?.let {
-                    it.attr("data-src").ifBlank { it.attr("src") }
-                })
-            }
+        var p=page
+        if(page>0){
+            p=page-1
         }
-        return HeadMainPageResponse(url, returnValue)
+        val collectedResults = mutableListOf<SearchResponse>()
+        var currentPage = if (p <= lastLoadedPage) lastLoadedPage else p
+        var pagesFetched = 0 // optional safety cap
+
+        suspend fun fetchPage(pp: Int): Pair<List<SearchResponse>, Boolean> {
+            val url = "$mainUrl/list/${tag}/${mainCategory}-${orderBy}-${pp}.html"
+            val document = app.get(url, timeout = 60).document
+
+            val rawItems = document.select("li.novel-item")
+            val isLast = rawItems.isNotEmpty()
+
+            val filtered_list=rawItems.mapNotNull { select ->
+                val a = select.selectFirst("a[title]") ?: return@mapNotNull null
+                val title =
+                    a.attr("title").takeIf { it.trim().isNotEmpty() }
+                        ?: a.selectFirst("h4.novel-title")
+                            ?.text() ?: return@mapNotNull null
+
+                val href = a.attr("href")
+                val chapterCount = select.selectFirst(".novel-stats:has(i.material-icons:contains(book))")
+                    ?.text()
+                    ?.replace("book", "")
+                    ?.trim()
+                    ?.substringBefore(" ")
+
+                if (!LibraryHelper.isChapterCountInRange(ChapterFilter, chapterCount.toString())) {
+                    return@mapNotNull null
+                }
+
+                // Skip duplicates across loads
+                if (!seenUrls.add(href)) {
+                    return@mapNotNull null
+                }
+
+                newSearchResponse(
+                    name = title,
+                    url = href
+                ) {
+                    posterUrl = fixUrlNull(select.selectFirst("img")?.let {
+                        it.attr("data-src").ifBlank { it.attr("src") }
+                    })
+                    totalChapterCount = chapterCount
+                }
+            }
+
+
+            lastLoadedPage = pp
+            return Pair(filtered_list, isLast)
+        }
+        while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
+            val (pageResults, hadRawItems) = fetchPage(currentPage)
+
+            // If there were no raw items on this page, it's the end — break
+            if (!hadRawItems) break
+
+            // Add whatever passed the filters (could be empty) and continue to next page if needed
+            if (pageResults.isNotEmpty()) {
+                collectedResults.addAll(pageResults)
+            }
+
+            // Prepare for next iteration
+            currentPage++
+            pagesFetched++
+        }
+        val url = "$mainUrl/list/${tag}/${mainCategory}-${orderBy}-${lastLoadedPage}.html"
+        return HeadMainPageResponse(url, collectedResults)
     }
 
     private fun getRelated(document: Document): List<SearchResponse> {

@@ -184,30 +184,6 @@ open class NovelFireAPI : MainAPI() {
             currentPage++
             pagesFetched++
         }
-
-//        val url = "$mainUrl/genre-${tag}/${orderBy}/${mainCategory}/all-novel?page=$page"
-//        val document = app.get(url).document
-//
-//
-//        val returnValue = document.select("li.novel-item").mapNotNull { select ->
-//            val node = select.selectFirst("a[title]") ?: return@mapNotNull null
-//            val href = node.attr("href")
-//            val title =
-//                node.attr("title").takeIf { !it.isEmpty() } ?: node.selectFirst("h4.novel-title")
-//                    ?.text() ?: return@mapNotNull null
-//
-//            newSearchResponse(
-//                name = title,
-//                url = href
-//            ) {
-//                posterUrl = fixUrlNull(
-//                    select.selectFirst("img")?.attr("data-src")
-//                        ?: select.selectFirst("img")?.attr("src")
-//                )
-//            }
-//
-//        }
-
         val url = "$mainUrl/genre-${tag}/${orderBy}/${mainCategory}/all-novel?page=${lastLoadedPage}"
 
         return HeadMainPageResponse(url,collectedResults)

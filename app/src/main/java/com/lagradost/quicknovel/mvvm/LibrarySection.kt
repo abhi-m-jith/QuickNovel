@@ -100,7 +100,7 @@ object LibraryHelper {
 
 
     enum class ChapterCountFilter(val displayName: String) {
-        ALL("all"),
+        ALL("All"),
         LESS_THAN_100("<100"),
         GREATER_EQUAL_100(">100"),
         GREATER_EQUAL_200(">200"),

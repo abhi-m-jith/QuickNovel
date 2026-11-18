@@ -436,8 +436,13 @@ class MainPageViewModel2(
                     } else {
                         state.value.filter.query.chapterCount
                     }
+                val previousChapterCount = state.value.filter.query.chapterCount
                 if (action.type == DialogType.ChapterCount) {
                     api.api.ChapterFilter = selectedChapterCount
+
+                    if (previousChapterCount != selectedChapterCount) {
+                        api.api.FABFilterApplied()
+                    }
                 }
 
                 updateState {

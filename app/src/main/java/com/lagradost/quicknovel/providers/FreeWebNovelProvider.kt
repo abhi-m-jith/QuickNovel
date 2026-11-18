@@ -3,6 +3,7 @@ package com.lagradost.quicknovel.providers
 import android.net.Uri
 import com.lagradost.quicknovel.ChapterData
 import com.lagradost.quicknovel.HeadMainPageResponse
+import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
 import com.lagradost.quicknovel.R
@@ -85,34 +86,99 @@ open class FreewebnovelAPI : MainAPI() {
         "Most Popular" to "most-popular"
     )
 
+    override var isChapterCountFilterNeeded=true
+    var lastLoadedPage=1
+    val minBooksNeeded=11
+    val maxPagesToFetch=10
+
+    val seenUrls = HashSet<String>()
+
+    override fun FABFilterApplied() {
+        lastLoadedPage=1
+        seenUrls.clear()
+    }
+    override fun ResetFiltersandPage() {
+        FABFilterApplied()
+        ChapterFilter= LibraryHelper.ChapterCountFilter.ALL
+    }
     override suspend fun loadMainPage(
         page: Int,
         mainCategory: String?,
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        val url =
-            if (tag.isNullOrBlank()) "$mainUrl/sort/$orderBy/${if (mainCategory.isNullOrBlank()) "" else "$mainCategory/"}$page" else "$mainUrl/genre/$tag/${if (mainCategory.isNullOrBlank()) "" else "$mainCategory/"}$page"
-        val document = app.get(url).document
-        val headers = document.select("div.ul-list1.ul-list1-2.ss-custom > div.li-row")
-        val returnValue = headers.mapNotNull { h ->
-            val h3 = h.selectFirst("h3.tit > a") ?: return@mapNotNull null
-            newSearchResponse(
-                name = h3.attr("title"),
-                url = h3.attr("href") ?: return@mapNotNull null
-            ) {
-                posterUrl = fixUrlNull(
-                    h.selectFirst("picture source")
-                        ?.attr("srcset")
-                        ?.split(",")
-                        ?.lastOrNull()
-                        ?.trim()
-                        ?.substringBefore(" ")
-                ) ?: fixUrlNull(document.selectFirst("div.pic img")?.attr("src"))
-                latestChapter = h.select("div.item")[2].selectFirst("> div > a")?.text()
+
+        val collectedResults = mutableListOf<SearchResponse>()
+        var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page
+        var pagesFetched = 0 // optional safety cap
+
+        suspend fun fetchPage(pp: Int): Pair<List<SearchResponse>, Boolean> {
+            val url =
+                if (tag.isNullOrBlank()) "$mainUrl/sort/$orderBy/${if (mainCategory.isNullOrBlank()) "" else "$mainCategory/"}$pp" else "$mainUrl/genre/$tag/${if (mainCategory.isNullOrBlank()) "" else "$mainCategory/"}$pp"
+            val document = app.get(url).document
+            val rawItems = document.select("div.ul-list1.ul-list1-2.ss-custom > div.li-row")
+            val isLast = rawItems.isNotEmpty()
+
+            val filtered_list=rawItems.mapNotNull { select ->
+                val h3 = select.selectFirst("h3.tit > a") ?: return@mapNotNull null
+
+                val title =h3.attr("title") ?: return@mapNotNull null
+
+                val href = h3.attr("href")
+                val chapterCount = select.selectFirst("a.chapter span.s1")
+                    ?.text()
+                    ?.substringBefore(" ")
+
+                if (!LibraryHelper.isChapterCountInRange(ChapterFilter, chapterCount.toString())) {
+                    return@mapNotNull null
+                }
+
+                // Skip duplicates across loads
+                if (!seenUrls.add(href)) {
+                    return@mapNotNull null
+                }
+
+                newSearchResponse(
+                    name = title,
+                    url = href
+                ) {
+                    posterUrl = fixUrlNull(
+                        select.selectFirst("picture source")
+                            ?.attr("srcset")
+                            ?.split(",")
+                            ?.lastOrNull()
+                            ?.trim()
+                            ?.substringBefore(" ")
+                    ) ?: fixUrlNull(document.selectFirst("div.pic img")?.attr("src"))
+                    totalChapterCount = chapterCount
+                }
             }
+
+
+            lastLoadedPage = pp
+            return Pair(filtered_list, isLast)
         }
-        return HeadMainPageResponse(url, returnValue)
+
+        while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
+            val (pageResults, hadRawItems) = fetchPage(currentPage)
+
+            // If there were no raw items on this page, it's the end — break
+            if (!hadRawItems) break
+
+            // Add whatever passed the filters (could be empty) and continue to next page if needed
+            if (pageResults.isNotEmpty()) {
+                collectedResults.addAll(pageResults)
+            }
+
+            // Prepare for next iteration
+            currentPage++
+            pagesFetched++
+        }
+
+        val url =
+            if (tag.isNullOrBlank()) "$mainUrl/sort/$orderBy/${if (mainCategory.isNullOrBlank()) "" else "$mainCategory/"}$lastLoadedPage" else "$mainUrl/genre/$tag/${if (mainCategory.isNullOrBlank()) "" else "$mainCategory/"}$lastLoadedPage"
+
+        return HeadMainPageResponse(url, collectedResults)
     }
 
     //used to getChapterList. It's necesary because LibRead and Freewebnovel requires different things.

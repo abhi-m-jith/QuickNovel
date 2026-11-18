@@ -33,6 +33,7 @@ import com.lagradost.quicknovel.providers.LnMTLProvider
 import com.lagradost.quicknovel.providers.LuxonScansProvider
 import com.lagradost.quicknovel.providers.MeioNovelProvider
 import com.lagradost.quicknovel.providers.MtlNovelProvider
+import com.lagradost.quicknovel.providers.MtlbooksProvider
 import com.lagradost.quicknovel.providers.NoBadNovelProvider
 import com.lagradost.quicknovel.providers.NovLoveProvider
 import com.lagradost.quicknovel.providers.NovelBinProvider
@@ -149,6 +150,7 @@ class Apis {
             WuxiaClickProvider,
             WuxiaWorldProvider,
             WebnovelFanficProvider,
+            MtlbooksProvider,
             //WuxiaWorldOnlineProvider(), // Site does not work
             //WuxiaWorldSiteProvider(),
         ).sortedBy { it.name }

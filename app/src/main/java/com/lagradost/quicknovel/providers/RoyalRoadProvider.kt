@@ -3,6 +3,7 @@ package com.lagradost.quicknovel.providers
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.quicknovel.ErrorLoadingException
 import com.lagradost.quicknovel.HeadMainPageResponse
+import com.lagradost.quicknovel.LibraryHelper
 import com.lagradost.quicknovel.LoadResponse
 import com.lagradost.quicknovel.MainAPI
 import com.lagradost.quicknovel.R
@@ -10,11 +11,13 @@ import com.lagradost.quicknovel.Score
 import com.lagradost.quicknovel.SearchResponse
 import com.lagradost.quicknovel.SlopStatus
 import com.lagradost.quicknovel.UserReview
+import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newChapterData
 import com.lagradost.quicknovel.newReview
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
 import com.lagradost.quicknovel.setStatus
+import com.lagradost.quicknovel.util.AppUtils.toJson
 import org.jsoup.Jsoup
 
 object RoyalRoadProvider : MainAPI() {
@@ -106,6 +109,8 @@ object RoyalRoadProvider : MainAPI() {
         val title: String,
         @JsonProperty("cover")
         val cover: String?,
+        @JsonProperty("chapterCount")
+        val totalChapters: String?,
         //@JsonProperty("thumbnailHash")
         //val thumbnailHash: String,
     )
@@ -385,7 +390,6 @@ object RoyalRoadProvider : MainAPI() {
     fun getFictionIdFromUrl(url: String) = (fictionIdRegex.find(url) ?: throw ErrorLoadingException(
         "Invalid url"
     )).groupValues[1].toInt()
-
     @Throws
     fun getChapterIdFromUrl(url: String) = (chapterIdRegex.find(url) ?: throw ErrorLoadingException(
         "Invalid url"
@@ -400,7 +404,24 @@ object RoyalRoadProvider : MainAPI() {
             genre = similar.tags.filter { it.type == "Genre" }.map { it.name }
             synopsis = similar.description
             score = Score.from5(similar.averageRating)
+            totalChapterCount=similar.totalChapters
         }
+
+    override var isChapterCountFilterNeeded=true
+    var lastLoadedPage=1
+    val minBooksNeeded=11
+    val maxPagesToFetch=10
+
+    val seenUrls = HashSet<String>()
+
+    override fun FABFilterApplied() {
+        lastLoadedPage=1
+        seenUrls.clear()
+    }
+    override fun ResetFiltersandPage() {
+        FABFilterApplied()
+        ChapterFilter= LibraryHelper.ChapterCountFilter.ALL
+    }
 
     override suspend fun search(query: String): List<SearchResponse> {
         return search(
@@ -417,20 +438,54 @@ object RoyalRoadProvider : MainAPI() {
         orderBy: String?,
         tag: String?
     ): HeadMainPageResponse {
-        val response = list(
-            type = orderBy ?: "bestrated",
-            tag = tag ?: "",
-            page = page
-        )
+        val collectedResults = mutableListOf<SearchResponse>()
+        var currentPage = if (page <= lastLoadedPage) lastLoadedPage else page
+        var pagesFetched = 0 // optional safety cap
+        suspend fun fetchPage(pp: Int): Pair<List<SearchResponse>, Boolean> {
+            val response = list(
+                type = orderBy ?: "bestrated",
+                tag = tag ?: "",
+                page = pp
+            )
 
-        return HeadMainPageResponse(
-            /** TODO FIX so you can open it in the browser */
-            url = "$mainUrl/fictions/$orderBy?page=$page${if (tag == null || tag == "") "" else "&genre=$tag"}",
-            list = if (response.paginate.page < page) {
+            val resultList=if (response.paginate.page < page) {
                 emptyList()
             } else {
                 response.data.map(::newSearchResponse)
             }
+            val hadAnyRawItems = resultList.size > 0
+
+            val filtered = mutableListOf<SearchResponse>()
+            for (i in 0 until resultList.size){
+                val item = resultList[i]
+                if (!LibraryHelper.isChapterCountInRange(ChapterFilter, item.totalChapterCount.toString())) {
+                    continue
+                }
+                filtered.add(item)
+            }
+
+            lastLoadedPage = pp
+            return Pair(filtered, hadAnyRawItems)
+        }
+        while (collectedResults.size < minBooksNeeded && pagesFetched < maxPagesToFetch) {
+            val (pageResults, hadRawItems) = fetchPage(currentPage)
+
+            // If there were no raw items on this page, it's the end — break
+            if (!hadRawItems) break
+
+            // Add whatever passed the filters (could be empty) and continue to next page if needed
+            if (pageResults.isNotEmpty()) {
+                collectedResults.addAll(pageResults)
+            }
+
+            // Prepare for next iteration
+            currentPage++
+            pagesFetched++
+        }
+        return HeadMainPageResponse(
+            /** TODO FIX so you can open it in the browser */
+            url = "$mainUrl/fictions/$orderBy?page=$lastLoadedPage${if (tag == null || tag == "") "" else "&genre=$tag"}",
+            list = collectedResults
         )
     }
 

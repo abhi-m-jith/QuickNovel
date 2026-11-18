@@ -14,7 +14,7 @@ import com.lagradost.quicknovel.fixUrl
 import com.lagradost.quicknovel.fixUrlNull
 import com.lagradost.quicknovel.newSearchResponse
 import com.lagradost.quicknovel.newStreamResponse
-import com.lagradost.quicknovel.providers.WebnovelFanficProvider.Companion.MOBILE_USER_AGENT
+import com.lagradost.quicknovel.providers.WebnovelFanficAPI.Companion.MOBILE_USER_AGENT
 import com.lagradost.quicknovel.setStatus
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -22,16 +22,15 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
-private val chapterContentCache = LruCache<String, String>(20) // Cache last 20 chapter contents
-class MtlbooksProvider : MainAPI()
+object MtlbooksProvider : MtlbooksAPI()
+
+open class MtlbooksAPI : MainAPI()
 {
     override val name = "MTL Books"
     override val mainUrl = "https://mtlbooks.com"
     override val hasMainPage = true
 
     override val iconId = R.drawable.icon_mtlbooks
-
-    override val infiniteScroll=true
 
     override val mainCategories = listOf(
         "All" to "",
@@ -402,10 +401,6 @@ class MtlbooksProvider : MainAPI()
     }
 
     override suspend fun loadHtml(url: String): String? {
-        chapterContentCache[url]?.let {
-            Log.d("MTL BOOKS", "Loaded chapter content from cache for $url")
-            return it
-        }
 
         val fullUrl = fixUrl(url)
         //Log.d("MTL BOOKS", "Loading Chapter HTML from URL: $fullUrl")
@@ -426,7 +421,6 @@ class MtlbooksProvider : MainAPI()
 
             if (content != null) {
                 Log.d("MTL BOOKS", "Chapter Content Loaded Successfully")
-                chapterContentCache[url] = content
                 return content
             } else {
                 Log.e("MTL BOOKS", "Chapter Content NOT FOUND in expected structure")

@@ -39,8 +39,6 @@ import kotlin.coroutines.CoroutineContext
 private var cachedCookies: String? = null
 private var cachedCsrfToken: String? = null
 
-
-
 object WebnovelFanficProvider : WebnovelFanficAPI()
 
 open class WebnovelFanficAPI : MainAPI(){

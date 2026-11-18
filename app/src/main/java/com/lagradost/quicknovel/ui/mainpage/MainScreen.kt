@@ -2,6 +2,7 @@ package com.lagradost.quicknovel.ui.mainpage
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -354,6 +356,7 @@ fun MainPageSearchBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
                     .padding(bottom = 5.dp, start = 5.dp, end = 5.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
@@ -390,7 +393,6 @@ fun RowScope.SelectButton(text: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         Modifier
-            .weight(1.0f)
             .padding(horizontal = 5.dp),
         colors = Colors.blackButton,
     ) {

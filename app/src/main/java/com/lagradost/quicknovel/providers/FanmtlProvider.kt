@@ -2,7 +2,7 @@ package com.lagradost.quicknovel.providers
 
 import com.lagradost.quicknovel.R
 
-class FanmtlProvider : WuxiaBoxProvider()
+class FanmtlProvider : WuxiaBoxAPI()
 {
     override val name = "FanMTL"
     override val mainUrl = "https://www.fanmtl.com"

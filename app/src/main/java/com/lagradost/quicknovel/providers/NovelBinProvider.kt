@@ -89,12 +89,11 @@ open class NovelBinAPI : AllNovelAPI() {
     override val orderBys = listOf(
         "Trending" to "",
         "Last updated" to "LASTEST",
-        "Recentrly added" to "NEW",
+        "Recently added" to "NEW",
         "Most viewed" to "ALL_TIME",
         "Popular this week" to "POPULAR",
-        "Tpo rated" to "RATING",
+        "Top rated" to "RATING",
         "Most chapters" to "CHAPTERS"
-
     )
 
     override suspend fun loadMainPage(
@@ -105,9 +104,7 @@ open class NovelBinAPI : AllNovelAPI() {
     ): HeadMainPageResponse {
         val url =
             if (orderBy == "" && tag != "All") "$mainUrl/novelping-genres/$tag?page=$page" else "$mainUrl/sort/hot?page=$page&sort=$orderBy"
-        println(url)
         val document = app.get(url).document
-        println(document)
         return HeadMainPageResponse(
             url,
             list = document.select("div.list>div.row").mapNotNull { element ->

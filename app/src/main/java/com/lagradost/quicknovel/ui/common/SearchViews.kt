@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -269,6 +270,21 @@ fun SearchResponseRow(
                 .padding(10.dp)
                 .weight(1.0f)
         ) {
+            val InLibrary=response.bookReadStatus
+            if(InLibrary != null && InLibrary != "NONE") {
+                Text(
+                    text = InLibrary,
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .rounded()
+                        .background(colorResource(R.color.boxNovelColor))
+                        .padding(
+                            horizontal = 6.dp,
+                            vertical = 2.dp
+                        )
+                )
+            }
             Text(
                 response.name,
                 maxLines = 2,
@@ -322,6 +338,13 @@ fun SearchResponseRow(
             if (text != null) {
                 Text(
                     text = text,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (!response.totalChapterCount.isNullOrBlank()) {
+                Text(
+                    text = "${response.totalChapterCount} Chapters",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -537,44 +560,57 @@ fun SearchResponseItem(
                     contentDescription = response.name,
                     modifier = Modifier.fillMaxSize()
                 )
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ){
-                    val InLibrary=response.bookReadStatus
-                    if(InLibrary != null && InLibrary != "NONE") {
+                val InLibrary=response.bookReadStatus
+
+                if(InLibrary != null && InLibrary != "NONE") {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(20.dp)
+                            .background(colorResource(R.color.boxNovelColor))
+                        ,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ){
                         Text(
                             text = InLibrary,
                             color = Color.White,
                             fontSize = 12.sp,
-                            modifier = Modifier
-                                .rounded()
-                                .background(colorResource(R.color.boxNovelColor))
-                                .padding(
-                                    horizontal = 6.dp,
-                                    vertical = 2.dp
-                                )
+//                            modifier = Modifier
+//                                .rounded()
+//                                .background(colorResource(R.color.boxNovelColor))
+//                                .padding(
+//                                    horizontal = 6.dp,
+//                                    vertical = 2.dp
+//                                )
                         )
                     }
-                    else{
-                        if (!response.totalChapterCount.isNullOrBlank()) {
-                            Text(
-                                text = "${response.totalChapterCount} ch",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                modifier = Modifier
-                                    .rounded()
-                                    .background(colorResource(R.color.boxNovelColor))
-                                    .padding(
-                                        horizontal = 6.dp,
-                                        vertical = 2.dp
-                                    )
-                            )
-                        }
+                }
+                if (!response.totalChapterCount.isNullOrBlank()) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ){
+                        Text(
+                            text = "${response.totalChapterCount} Ch",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .rounded()
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .background(Color.Black.copy(alpha = 0.6f))
+                                .padding(4.dp)
+                        )
                     }
                 }
+
                 when (response.slopStatus) {
                     SlopStatus.AiAssisted, SlopStatus.AiGenerated -> {
                         Text(
@@ -608,6 +644,11 @@ fun SearchResponseItem(
                         Box(
                             modifier = Modifier
                                 .rounded()
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
                                 .background(Color.Black.copy(alpha = 0.6f))
                                 .padding(4.dp)
                         ) {
